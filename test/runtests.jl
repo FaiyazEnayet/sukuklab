@@ -4,360 +4,236 @@ using Dates
 
 @testset "Volkit" begin
 
-    @testset "black_scholes" begin
-        S0, K, T, r, σ = 100.0, 100.0, 1.0, 0.05, 0.2
-        c = bs_price(S0, K, T, r, σ; kind=:call)
-        p = bs_price(S0, K, T, r, σ; kind=:put)
-
-        # Textbook ATM value (Hull-style parameters).
-        @test isapprox(c, 10.4506; atol=1e-3)
-        # Put-call parity.
-        @test isapprox(c - p, S0 - K * exp(-r * T); atol=1e-8)
-        # Implied-vol round trip.
-        @test isapprox(implied_vol(c, S0, K, T, r; kind=:call), σ; atol=1e-6)
-        @test isapprox(implied_vol(p, S0, K, T, r; kind=:put), σ; atol=1e-6)
-        # OTM bounds return NaN instead of garbage.
-        @test isnan(implied_vol(-1.0, S0, K, T, r; kind=:call))
-
-        g = bs_greeks(S0, K, T, r, σ; kind=:call)
-        @test 0.0 < g.delta < 1.0
-        @test g.gamma > 0.0
-        @test g.vega > 0.0
-        gp = bs_greeks(S0, K, T, r, σ; kind=:put)
-        @test isapprox(g.delta - gp.delta, 1.0; atol=1e-10)  # q = 0
-        @test isapprox(g.gamma, gp.gamma; atol=1e-10)        # gamma is kind-agnostic
-    end
-
-    @testset "greeks_vs_finite_differences" begin
-        S0, K, T, r, σ = 100.0, 100.0, 1.0, 0.05, 0.2
-        eps = 1e-5
-        fd_delta = (bs_price(S0 + eps, K, T, r, σ) - bs_price(S0 - eps, K, T, r, σ)) / (2eps)
-        @test isapprox(bs_delta(S0, K, T, r, σ), fd_delta; atol=1e-7)
-        fd_gamma = (bs_delta(S0 + eps, K, T, r, σ) - bs_delta(S0 - eps, K, T, r, σ)) / (2eps)
-        @test isapprox(bs_gamma(S0, K, T, r, σ), fd_gamma; atol=1e-6)
-        fd_vanna = (bs_delta(S0, K, T, r, σ + eps) - bs_delta(S0, K, T, r, σ - eps)) / (2eps)
-        @test isapprox(bs_vanna(S0, K, T, r, σ), fd_vanna; atol=1e-5)
-        fd_volga = (bs_vega(S0, K, T, r, σ + eps) - bs_vega(S0, K, T, r, σ - eps)) / (2eps)
-        @test isapprox(bs_volga(S0, K, T, r, σ), fd_volga; atol=1e-4)
-    end
-
-    @testset "fft" begin
-        S0, T, r, σ = 100.0, 1.0, 0.05, 0.25
-        strikes = [80.0, 90.0, 100.0, 110.0, 120.0]
-        for K in strikes
-            fp = fft_price(S0, K, T, r; sigma=σ)
-            bs = bs_price(S0, K, T, r, σ; kind=:call)
-            @test isapprox(fp, bs; rtol=1e-6)
-        end
-        # Vector form agrees with the scalar closed form elementwise.
-        fp_vec = fft_price(S0, strikes, T, r; sigma=σ)
-        bs_vec = bs_price.(S0, strikes, T, r, σ; kind=:call)
-        @test all(isapprox.(fp_vec, bs_vec; rtol=1e-6))
-        # Put via parity matches the closed form.
-        fp_put = fft_price(S0, 100.0, T, r; sigma=σ, kind=:put)
-        bs_put = bs_price(S0, 100.0, T, r, σ; kind=:put)
-        @test isapprox(fp_put, bs_put; rtol=1e-6)
-        # Exactly one of sigma / cf is required.
-        @test_throws ArgumentError fft_price(S0, 100.0, T, r)
-    end
-
-    @testset "svi_recovery" begin
-        # Generate a synthetic smile from known params, fit, recover.
-        p_true = (0.04, 0.4, -0.4, 0.0, 0.2)
-        S0, r, T = 100.0, 0.02, 0.5
-        F = S0 * exp(r * T)
-        ks = collect(range(-0.6, 0.6; length=15))
-        strikes = F .* exp.(ks)
-        vols = svi_vol(p_true, ks, T)
-
-        params, info = fit_svi(strikes, vols, T, S0, r; n_restarts=6, seed=42)
-        @test info.rmse_vol < 5e-3
-        @test info.max_abs_err_vol < 2e-2
-
-        # The recovered surface interpolates the synthetic one back.
-        vols_fit = svi_vol(params, ks, T)
-        @test maximum(abs.(vols_fit .- vols)) < 2e-2
-
-        # Surface fit on two synthetic expiries is calendar-consistent.
-        p2 = (0.05, 0.45, -0.35, 0.0, 0.22)
-        T2 = 1.0
-        F2 = S0 * exp(r * T2)
-        ks2 = collect(range(-0.6, 0.6; length=13))
-        strikes2 = F2 .* exp.(ks2)
-        vols2 = svi_vol(p2, ks2, T2)
-        plist, sinfo = fit_surface([strikes, strikes2], [vols, vols2],
-                                   [T, T2], S0, r; n_restarts=4, seed=7)
-        @test sinfo.calendar_ok
-        # Mid-expiry interpolation stays between the slices in vol space.
-        mid = surface_vol(plist, [T, T2], [F * 1.0], 0.75, S0, r)[1]
-        @test 0.0 < mid < 1.0
-    end
-
-    @testset "svi_arbitrage" begin
-        # Gentle smile is butterfly-arbitrage-free by the Durrleman test.
-        p = (0.04, 0.1, 0.0, 0.0, 0.2)
-        arb = check_arbitrage(p)
-        @test arb.butterfly_ok
-        @test arb.min_g >= -1e-9
-        @test arb.min_w > 0.0
-        # A single-point query matches the vector form.
-        @test durrleman_g(p, 0.0) == durrleman_g(p, [0.0])[1]
-    end
-
-    @testset "heston_recovery" begin
-        # Synthetic Heston smile -> calibrate -> vols must come back.
-        # Reduced starts/grid keep the test suite fast; the library
-        # defaults (12 starts, 4096 grid) are tighter.
-        S0, T, r = 100.0, 0.5, 0.02
-        v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.35, -0.6
-        F = S0 * exp(r * T)
-        ks = collect(range(-0.4, 0.4; length=9))
-        strikes = F .* exp.(ks)
-        vols = heston_vols(S0, strikes, T, r, v0, kappa, theta, xi, rho;
-                           n_grid=2048, u_max=80.0)
-
-        params, info = calibrate_heston(strikes, vols, T, S0, r;
-                                        seed=3, n_starts=4, n_grid=2048,
-                                        u_max=80.0, polish=true)
-        @test info.rmse_vol < 1e-2
-        v0f, kappaf, thetaf, xif, rhof = params
-        @test 0.005 <= v0f <= 0.50
-        @test -0.99 <= rhof <= 0.30
-    end
-
-    @testset "fft_vs_heston_quadrature" begin
-        S0, T, r = 100.0, 1.0, 0.05
-        v0, kappa, theta, xi, rho = 0.04, 2.0, 0.04, 0.3, -0.7
-        strikes = [80.0, 90.0, 100.0, 110.0, 120.0]
-        cf = u -> heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho)
-        fq = fft_price(S0, strikes, T, r; cf=cf)
-        hq = heston_price(S0, strikes, T, r, v0, kappa, theta, xi, rho; kind=:call)
-        @test maximum(abs.(fq .- hq) ./ hq) < 1e-3
-    end
-
-    @testset "marketdata_fixture" begin
-        # Committed CBOE snapshot loads offline; no network in tests.
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
-        chain = chain_from_json(path)
-        @test chain.ticker == "SPY"
-        @test chain.spot ≈ 778.57
-        @test length(chain.quotes) == 1432  # 3 demo expiries
-        q0 = chain.quotes[1]
-        @test q0.expiry isa Date && q0.strike > 0.0
-        @test q0.bid >= 0.0 && q0.ask >= q0.bid
-        # round-trip through JSON preserves everything
-        tmp = tempname() * ".json"
-        chain_to_json(chain, tmp)
-        chain2 = chain_from_json(tmp)
-        @test chain2.spot == chain.spot
-        @test length(chain2.quotes) == length(chain.quotes)
-        @test chain2.quotes[1] == chain.quotes[1]
-        rm(tmp)
-    end
-
-    @testset "marketdata_cleaning" begin
-        e = Date("2026-12-18")
-        mk = (bid, ask, vol, oi; strike=780.0, call=true) ->
-            (expiry=e, strike=strike, is_call=call, bid=bid, ask=ask,
-             volume=vol, open_interest=oi, cboe_iv=0.15, theo=0.0)
-        good = mk(5.0, 5.2, 100.0, 500.0)
-        rows = [
-            good,                                   # kept
-            mk(0.0, 0.5, 100.0, 500.0),             # zero bid: dropped
-            mk(-1.0, 0.5, 100.0, 500.0),            # negative bid: dropped
-            mk(5.5, 5.0, 100.0, 500.0),             # crossed: dropped
-            mk(1.0, 6.0, 100.0, 500.0),             # spread 6x: dropped
-            mk(5.0, 5.2, 0.0, 500.0),               # no volume: dropped
-            mk(5.0, 5.2, 100.0, 0.0),               # no OI: dropped
-        ]
-        out = clean_chain(rows; min_volume=1.0, min_open_interest=1.0)
-        @test length(out) == 1
-        @test out[1].mid ≈ 5.1
-        @test out[1].strike == 780.0
-        # relaxed spread threshold keeps the wide-spread row too
-        out2 = clean_chain(rows; min_volume=1.0, min_open_interest=1.0,
-                           max_spread_frac=2.0)
-        @test length(out2) == 2
-    end
-
-    @testset "baw_properties" begin
-        # American >= European everywhere (calls and puts, with dividends).
-        for (S0, K, T, r, q, sig, kind) in [
-                (100.0, 100.0, 1.0, 0.05, 0.02, 0.25, :call),
-                (100.0, 100.0, 1.0, 0.05, 0.02, 0.25, :put),
-                (90.0, 100.0, 0.5, 0.05, 0.03, 0.30, :put),
-                (110.0, 100.0, 0.25, 0.05, 0.01, 0.40, :call)]
-            am = baw_price(S0, K, T, r, sig; q=q, kind=kind)
-            eu = bs_price(S0, K, T, r, sig; q=q, kind=kind)
-            @test am >= eu - 1e-10
-        end
-        # American call without dividends is never exercised early.
-        @test baw_price(100, 100, 1.0, 0.05, 0.25; q=0.0, kind=:call) ≈
-              bs_price(100, 100, 1.0, 0.05, 0.25; q=0.0, kind=:call) rtol=1e-2
-        # American put-call parity bounds (no dividends).
-        S0, K, T, r = 100.0, 105.0, 0.5, 0.05
-        C = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:call)
-        P = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:put)
-        @test S0 - K - 1e-8 <= C - P <= S0 - K * exp(-r * T) + 1e-8
-        # BAW vs the library Cox-Ross-Rubinstein tree (400 steps), 2% tolerance.
-        for (S0, K, T, q, sig, kind) in [(100.0, 100.0, 1.0, 0.02, 0.25, :put),
-                                          (100.0, 110.0, 0.5, 0.03, 0.30, :put),
-                                          (100.0, 100.0, 1.0, 0.02, 0.25, :call)]
-            b = baw_price(S0, K, T, 0.05, sig; q=q, kind=kind)
-            c = crr_price(S0, K, T, 0.05, sig; q=q, kind=kind, n=400)
-            @test abs(b - c) / c < 0.02
-        end
-    end
-
-    @testset "svi_real_fixture" begin
-        # SVI surface on the real SPY snapshot is arbitrage-free.
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
-        chain = chain_from_json(path)
-        clean = clean_chain(chain.quotes)
-        S0, r = chain.spot, 0.04
-        asof = Date(chain.timestamp)
-        expiries = [Date("2026-10-16"), Date("2026-11-20"), Date("2026-12-18")]
-        Ts, qs, Ks, Vs = Float64[], Float64[], [], []
-        for e in expiries
-            T = (e - asof).value / 365
-            q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
-            F = S0 * exp((r - q) * T)
-            otm = otm_quotes(clean, Dict(e => F))
-            ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
-                               kind=x.is_call ? :call : :put) for x in otm]
-            keep = .!isnan.(ivs)
-            push!(Ts, T); push!(qs, q)
-            push!(Ks, [x.strike for x in otm][keep])
-            push!(Vs, ivs[keep])
-        end
-        _, sinfo = fit_surface(Ks, Vs, Ts, S0, r; q=qs, n_restarts=2, seed=0)
-        for si in sinfo.slice_infos
-            @test si.butterfly_ok
-        end
-        @test sinfo.calendar_ok
-    end
-
-    @testset "heston_real_fixture" begin
-        # Heston converges on the real Nov-2026 smile; RMSE sane (< 5 vol pts).
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
-        chain = chain_from_json(path)
-        clean = clean_chain(chain.quotes)
-        S0, r = chain.spot, 0.04
-        asof = Date(chain.timestamp)
-        e = Date("2026-11-20")
-        T = (e - asof).value / 365
-        q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
-        F = S0 * exp((r - q) * T)
-        otm = otm_quotes(clean, Dict(e => F))
-        ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
-                           kind=x.is_call ? :call : :put) for x in otm]
-        keep = .!isnan.(ivs)
-        ks = [x.strike for x in otm][keep]
-        vs = ivs[keep]
-        idx = unique(round.(Int, range(1, length(ks); length=15)))
-        _, hinfo = calibrate_heston(ks[idx], vs[idx], T, S0, r; q=q, seed=0,
-                                    n_starts=3, n_grid=2048, u_max=100.0,
-                                    polish=true)
-        @test isfinite(hinfo.rmse_vol)
-        @test hinfo.rmse_vol < 0.05
-    end
-
-    @testset "bates_properties" begin
-        p = (0.04, 2.0, 0.04, 0.35, -0.6)
-        u = collect(range(0.1, 20.0; length=50))
-        # Zero jump intensity: exactly the Heston CF and price.
-        @test bates_cf(u, 0.5, 100.0, 0.05, p..., 0.0, -0.1, 0.2) ≈
-              heston_cf(u, 0.5, 100.0, 0.05, p...)
-        @test bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.0, -0.1, 0.2;
-                          kind=:call) ≈
-              heston_price(100.0, 100.0, 0.5, 0.05, p...; kind=:call)
-        # Martingale: phi(-i) = S0 * exp((r - q) * T), jumps included.
-        @test bates_cf(-im, 0.5, 100.0, 0.05, p..., 0.7, -0.1, 0.2; q=0.01) ≈
-              100.0 * exp((0.05 - 0.01) * 0.5)
-        # Put-call parity.
-        c = bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.7, -0.1, 0.2;
-                        kind=:call)
-        pt = bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.7, -0.1, 0.2;
-                         kind=:put)
-        @test isapprox(c - pt, 100.0 - 100.0 * exp(-0.05 * 0.5); atol=1e-6)
-        # Jumps move short-dated OTM puts: positive jump premium.
-        base = bates_price(100.0, 90.0, 0.1, 0.05, p..., 0.0, -0.1, 0.2;
-                           kind=:put)
-        jumped = bates_price(100.0, 90.0, 0.1, 0.05, p..., 1.0, -0.1, 0.2;
-                             kind=:put)
-        @test jumped > base
-    end
-
-    @testset "bates_real_fixture" begin
-        # Bates on the 6-day Oct-16 smile Heston cannot fit (RMSE 0.081):
-        # jumps must bring it clearly below 0.05.
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
-        chain = chain_from_json(path)
-        clean = clean_chain(chain.quotes)
-        S0, r = chain.spot, 0.04
-        asof = Date(chain.timestamp)
-        e = Date("2026-10-16")
-        T = (e - asof).value / 365
-        q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
-        F = S0 * exp((r - q) * T)
-        otm = otm_quotes(clean, Dict(e => F))
-        ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
-                           kind=x.is_call ? :call : :put) for x in otm]
-        keep = .!isnan.(ivs)
-        ks = [x.strike for x in otm][keep]
-        vs = ivs[keep]
-        idx = unique(round.(Int, range(1, length(ks); length=12)))
-        bp, binfo = calibrate_bates(ks[idx], vs[idx], T, S0, r; q=q, seed=0,
-                                    n_starts=4, polish=true)
-        @test isfinite(binfo.rmse_vol)
-        @test binfo.rmse_vol < 0.05
-        @test length(bp) == 8
-    end
-
-    @testset "crr_properties" begin
-        # Tree converges toward the BAW approximation as steps grow.
-        S0, K, T, r, q, sig = 100.0, 100.0, 1.0, 0.05, 0.03, 0.30
-        b = baw_price(S0, K, T, r, sig; q=q, kind=:put)
-        c200 = crr_price(S0, K, T, r, sig; q=q, kind=:put, n=200)
-        c800 = crr_price(S0, K, T, r, sig; q=q, kind=:put, n=800)
-        @test abs(c800 - b) / b < 0.02
-        @test abs(c200 - b) / b < 0.03
-        # American >= European everywhere (tolerance covers the tree's
-        # sawtooth discretization error, which decays ~1/n).
-        for (s, k, t, qq, kind) in [(100.0, 100.0, 1.0, 0.02, :call),
-                                   (100.0, 100.0, 1.0, 0.02, :put),
-                                   (90.0, 100.0, 0.5, 0.03, :put)]
-            am = crr_price(s, k, t, r, sig; q=qq, kind=kind, n=600)
-            eu = bs_price(s, k, t, r, sig; q=qq, kind=kind)
-            @test am >= eu - 0.01
-        end
-        # American put-call parity bounds (no dividends).
-        C = crr_price(100.0, 105.0, 0.5, 0.05, 0.3; q=0.0, kind=:call, n=300)
-        P = crr_price(100.0, 105.0, 0.5, 0.05, 0.3; q=0.0, kind=:put, n=300)
-        @test 100.0 - 105.0 - 1e-6 <= C - P <= 100.0 - 105.0 * exp(-0.05 * 0.5) + 1e-6
-        # At expiry it is the payoff.
-        @test crr_price(110.0, 100.0, 0.0, 0.05, 0.3; kind=:call, n=10) == 10.0
-        @test crr_price(90.0, 100.0, 0.0, 0.05, 0.3; kind=:put, n=10) == 10.0
-    end
-
-    @testset "sukuk" begin
-        # Par: profit rate equals yield.
-        @test isapprox(sukuk_price(100, 0.05, 0.05, 2.0), 100.0; atol=1e-8)
-        # Manual present value.
-        pv = sum(2.5 / 1.025^k for k in 1:4) + 100 / 1.025^4
-        @test isapprox(sukuk_price(100, 0.05, 0.05, 2.0), pv; atol=1e-8)
-        # Yield roundtrip.
-        y = sukuk_ytm(98.0, 100, 0.05, 2.0)
-        @test isapprox(sukuk_price(100, 0.05, y, 2.0), 98.0; atol=1e-6)
-        # Zero profit rate: pure discount.
-        @test isapprox(sukuk_price(100, 0.0, 0.05, 2.0), 100 / 1.025^4;
+    @testset "sukuk_price" begin
+        # Par: price equals face when yield matches the profit rate.
+        @test isapprox(sukuk_price(100.0, 0.05, 0.05, 5.0), 100.0; atol=1e-8)
+        # Discount: yield above the profit rate.
+        p = sukuk_price(100.0, 0.05, 0.06, 5.0)
+        @test p < 100.0
+        # Premium: yield below the profit rate.
+        @test sukuk_price(100.0, 0.05, 0.04, 5.0) > 100.0
+        # Closed form cross-check: 1y annual, 5 on 100 at 6%.
+        @test isapprox(sukuk_price(100.0, 0.05, 0.06, 1.0; m=1),
+                       105 / 1.06; atol=1e-10)
+        # Zero yield is just the sum of cash flows.
+        @test isapprox(sukuk_price(100.0, 0.05, 0.0, 2.0; m=2), 110.0;
                        atol=1e-8)
-        # Higher yield means lower price.
-        @test sukuk_price(100, 0.05, 0.06, 2.0) < sukuk_price(100, 0.05, 0.04, 2.0)
-        # Bad inputs.
-        @test_throws ArgumentError sukuk_price(-100, 0.05, 0.05, 2.0)
-        @test_throws ArgumentError sukuk_price(100, 0.05, 0.05, 0.0)
-        @test isnan(sukuk_ytm(-5.0, 100, 0.05, 2.0))
+        @test_throws ArgumentError sukuk_price(0.0, 0.05, 0.05, 5.0)
+        @test_throws ArgumentError sukuk_price(100.0, 0.05, 0.05, 0.0)
+    end
+
+    @testset "sukuk_ytm" begin
+        # Round trip through the pricer.
+        for y in (0.03, 0.05, 0.08)
+            p = sukuk_price(100.0, 0.05, y, 5.0)
+            @test isapprox(sukuk_ytm(p, 100.0, 0.05, 5.0), y; atol=1e-8)
+        end
+        # Par bond recovers the profit rate.
+        @test isapprox(sukuk_ytm(100.0, 100.0, 0.05, 5.0), 0.05; atol=1e-8)
+        # Impossible prices return NaN, not garbage.
+        @test isnan(sukuk_ytm(-5.0, 100.0, 0.05, 5.0))
+        @test isnan(sukuk_ytm(1e9, 100.0, 0.05, 5.0))
+    end
+
+    @testset "cashflows" begin
+        terms = SukukTerms("Test ijara", 1000.0, 0.05,
+                           Date(2026, 1, 15), Date(2028, 1, 15), 2, "ijara")
+        cfs = payment_schedule(terms)
+        # 2y semi-annual: 4 distributions, last includes principal.
+        @test length(cfs) == 4
+        @test all(cf.amount ≈ 25.0 for cf in cfs[1:3])
+        @test cfs[end].amount ≈ 1025.0
+        @test cfs[end].date == Date(2028, 1, 15)
+        @test sum(cf.amount for cf in cfs) ≈ 1100.0
+
+        # Murabaha installments: equal payments summing to cost plus profit.
+        m = SukukTerms("Test murabaha", 1000.0, 0.05,
+                       Date(2026, 1, 15), Date(2028, 1, 15), 2, "murabaha";
+                       amortizing=true)
+        mcfs = payment_schedule(m)
+        @test length(mcfs) == 4
+        @test all(cf.amount ≈ mcfs[1].amount for cf in mcfs)
+        T = yearfrac(Date(2026, 1, 15), Date(2028, 1, 15), :actual_365)
+        @test sum(cf.amount for cf in mcfs) ≈ 1000 * (1 + 0.05 * T)
+
+        # Day counts.
+        @test yearfrac(Date(2026, 1, 1), Date(2026, 7, 1), :thirty_360) ≈ 0.5
+        @test yearfrac(Date(2026, 1, 1), Date(2027, 1, 1), :actual_365) ≈ 1.0
+        @test_throws ArgumentError yearfrac(Date(2026, 1, 2), Date(2026, 1, 1),
+                                            :actual_365)
+        @test_throws ArgumentError yearfrac(Date(2026, 1, 1), Date(2026, 1, 2),
+                                            :unknown)
+        # Terms validation.
+        @test_throws ArgumentError SukukTerms("x", -100.0, 0.05,
+                                              Date(2026, 1, 15),
+                                              Date(2028, 1, 15), 2, "ijara")
+        @test_throws ArgumentError SukukTerms("x", 100.0, 0.05,
+                                              Date(2028, 1, 15),
+                                              Date(2028, 1, 15), 2, "ijara")
+        @test_throws ArgumentError SukukTerms("x", 100.0, 0.05,
+                                              Date(2026, 1, 15),
+                                              Date(2028, 1, 15), 5, "ijara")
+    end
+
+    @testset "accrued_profit" begin
+        terms = SukukTerms("Test", 1000.0, 0.06,
+                           Date(2026, 1, 15), Date(2027, 1, 15), 2, "ijara")
+        # Halfway through the first half-year: half of the 30.0 coupon.
+        a = accrued_profit(terms, Date(2026, 4, 15))
+        @test isapprox(a, 15.0; atol=0.5)
+        # Just after a distribution date: near zero.
+        @test accrued_profit(terms, Date(2026, 7, 16)) < 1.0
+        # At maturity: nothing left to accrue.
+        @test accrued_profit(terms, Date(2027, 1, 15)) == 0.0
+        @test_throws ArgumentError accrued_profit(terms, Date(2026, 1, 15))
+    end
+
+    @testset "remaining_cashflows" begin
+        terms = SukukTerms("Test", 1000.0, 0.06,
+                           Date(2026, 1, 15), Date(2027, 1, 15), 2, "ijara")
+        cfs = payment_schedule(terms)
+        @test length(cfs) == 2
+        rest = remaining_cashflows(cfs, Date(2026, 7, 15))
+        @test length(rest) == 1
+        @test rest[1].date == Date(2027, 1, 15)
+        @test length(remaining_cashflows(cfs, Date(2026, 1, 14))) == 2
+    end
+
+    @testset "curve" begin
+        anchor = Date(2026, 1, 13)
+        curve = ZeroCurve(anchor, [0.5, 1.0, 2.0], [0.03, 0.035, 0.04])
+        # Interpolation and flat extrapolation.
+        @test zero_rate(curve, 0.75) ≈ 0.0325
+        @test zero_rate(curve, 0.5) ≈ 0.03
+        @test zero_rate(curve, 5.0) ≈ 0.04
+        @test zero_rate(curve, 0.1) ≈ 0.03
+        @test discount(curve, 1.0) ≈ exp(-0.035)
+        # Forward rate between pillars.
+        f = forward_rate(curve, 0.5, 1.0)
+        @test f ≈ (0.035 * 1.0 - 0.03 * 0.5) / 0.5
+        # Par rate on a flat curve: m * (exp(r / m) - 1).
+        flat = ZeroCurve(anchor, [10.0], [log(1.05)])
+        @test isapprox(par_rate(flat, 5.0, 2), 2 * (sqrt(1.05) - 1);
+                       atol=1e-8)
+        @test_throws ArgumentError ZeroCurve(anchor, [1.0, 0.5], [0.03, 0.04])
+        @test_throws ArgumentError forward_rate(curve, 1.0, 0.5)
+    end
+
+    @testset "bootstrap_synthetic" begin
+        # Flat 4% continuous curve: build par bonds, bootstrap must recover it.
+        anchor = Date(2026, 1, 1)
+        r = 0.04
+        instruments = Tuple{Vector{CashFlow},Float64}[]
+        for T in (0.5, 1.0, 2.0, 3.0)
+            n = Int(2T)
+            cfs = CashFlow[]
+            for i in 1:n
+                d = anchor + Month(6i)
+                amt = i < n ? 100 * (exp(r / 2) - 1) : 100 * exp(r / 2)
+                push!(cfs, CashFlow(d, amt))
+            end
+            price = sum(cf.amount *
+                        exp(-r * yearfrac(anchor, cf.date, :actual_365))
+                        for cf in cfs)
+            push!(instruments, (cfs, price))
+        end
+        # First instrument must be discount: prepend a 3m bill.
+        bill_t = yearfrac(anchor, anchor + Month(3), :actual_365)
+        bill = ([CashFlow(anchor + Month(3), 100.0)],
+                100.0 * exp(-r * bill_t))
+        curve = bootstrap([bill; instruments], anchor)
+        for z in curve.zeros
+            @test isapprox(z, r; atol=1e-6)
+        end
+        # Exact repricing of every input.
+        for (cfs, price) in [bill; instruments]
+            rp = sum(cf.amount * discount(curve, cf.date) for cf in cfs)
+            @test isapprox(rp, price; atol=1e-6)
+        end
+        # A coupon bond with no discount instrument first must throw.
+        two = CashFlow[CashFlow(anchor + Month(6), 2.0),
+                       CashFlow(anchor + Month(12), 102.0)]
+        @test_throws ArgumentError bootstrap([(two, 99.0)], anchor)
+    end
+
+    @testset "bootstrap_iilm_real" begin
+        # Real published inputs: IILM January 2026 auction clearing rates.
+        anchor = Date(2026, 1, 13)
+        iilm = [(1, 0.0381), (3, 0.0384), (6, 0.0382), (12, 0.0345)]
+        instruments = Tuple{Vector{CashFlow},Float64}[]
+        for (months, rate) in iilm
+            mat = anchor + Month(months)
+            T = yearfrac(anchor, mat, :actual_365)
+            push!(instruments,
+                  ([CashFlow(mat, 100.0)], 100.0 / (1 + rate * T)))
+        end
+        curve = bootstrap(instruments, anchor)
+        @test length(curve.pillars) == 4
+        # Short end sits near 3.8%, 12m pillar lower: the published
+        # 12m clearing rate (3.45%) was below the 6m rate (3.82%).
+        @test 0.035 < curve.zeros[1] < 0.042
+        @test 0.035 < curve.zeros[3] < 0.042
+        @test curve.zeros[4] < curve.zeros[3]
+        # Curve reprices the auction inputs.
+        for (cfs, price) in instruments
+            rp = sum(cf.amount * discount(curve, cf.date) for cf in cfs)
+            @test isapprox(rp, price; rtol=1e-9)
+        end
+    end
+
+    @testset "analytics" begin
+        anchor = Date(2026, 1, 15)
+        terms = SukukTerms("Test", 1000.0, 0.05, anchor,
+                           Date(2031, 1, 15), 2, "ijara")
+        cfs = payment_schedule(terms)
+        # YTM round trip.
+        for y in (0.03, 0.05, 0.07)
+            p = price_from_cashflows(cfs, y, anchor)
+            @test isapprox(ytm_from_price(cfs, p, anchor), y; atol=1e-8)
+        end
+        @test isnan(ytm_from_price(cfs, -10.0, anchor))
+        @test isnan(ytm_from_price(cfs, 1e12, anchor))
+        # Current yield at par equals the profit rate.
+        @test current_yield(50.0, 1000.0) ≈ 0.05
+        # Zero-coupon: Macaulay duration equals maturity.
+        zc = [CashFlow(Date(2031, 1, 15), 1000.0)]
+        T = yearfrac(anchor, Date(2031, 1, 15), :actual_365)
+        @test isapprox(macaulay_duration(zc, 0.05, anchor), T; atol=1e-8)
+        # Modified duration is the finite-difference slope (central).
+        y0 = 0.05
+        md = modified_duration(cfs, y0, anchor)
+        p0 = price_from_cashflows(cfs, y0, anchor)
+        h = 1e-4
+        p_up = price_from_cashflows(cfs, y0 + h, anchor)
+        p_dn = price_from_cashflows(cfs, y0 - h, anchor)
+        @test isapprox(-(p_up - p_dn) / p0 / (2h), md; rtol=1e-6)
+        # Convexity is positive for a bullet structure.
+        @test convexity(cfs, y0, anchor) > 0
+        # DV01 matches a 1bp reprice.
+        @test isapprox(dv01(cfs, y0, anchor),
+                       p0 - price_from_cashflows(cfs, y0 + 1e-4, anchor);
+                       rtol=1e-3)
+        # Parallel shift repricing is exact by construction.
+        @test price_under_shift(cfs, y0, 100, anchor) ≈
+              price_from_cashflows(cfs, y0 + 0.01, anchor)
+        # Duration + convexity approximate a small shift well.
+        dp_approx = -md * p0 * 0.0025 +
+                    0.5 * convexity(cfs, y0, anchor) * p0 * 0.0025^2
+        dp_exact = price_under_shift(cfs, y0, 25, anchor) - p0
+        @test isapprox(dp_approx, dp_exact; rtol=1e-3)
+    end
+
+    @testset "portfolio" begin
+        hs = [Holding("a", 600.0, 0.05, 4.0, 20.0),
+              Holding("b", 400.0, 0.03, 2.0, 6.0)]
+        @test portfolio_value(hs) ≈ 1000.0
+        @test weighted_ytm(hs) ≈ 0.6 * 0.05 + 0.4 * 0.03
+        @test weighted_duration(hs) ≈ 0.6 * 4.0 + 0.4 * 2.0
+        @test weighted_convexity(hs) ≈ 0.6 * 20.0 + 0.4 * 6.0
+        # Single holding returns its own measures.
+        @test weighted_ytm([hs[1]]) ≈ 0.05
+        @test_throws ArgumentError weighted_ytm(Holding[])
+        @test_throws ArgumentError Holding("x", -1.0, 0.05, 4.0, 20.0)
     end
 
 end

@@ -1,36 +1,26 @@
 """
-Volkit: a pip-installable options toolkit.
+Volkit: fixed-income analytics for sukuk, in Julia.
 
-Black-Scholes pricing and greeks, SVI smile fits, Heston calibration,
-and Carr-Madan FFT pricing, one clean import.
+Cash-flow modeling for ijara, murabaha and wakala structures,
+profit-rate curve bootstrapping, yield and duration analytics, and
+portfolio aggregation. One clean import, no derivatives anywhere.
 """
 module Volkit
 
-include("black_scholes.jl")
-include("american.jl")
-include("svi.jl")
-include("heston.jl")
-include("bates.jl")
-include("fft.jl")
-include("marketdata.jl")
 include("sukuk.jl")
+include("cashflows.jl")
+include("curve.jl")
+include("analytics.jl")
+include("portfolio.jl")
 
-# Plotting lives in ext/VolkitPlotsExt.jl and loads only when the user
-# has Plots.jl available. These stubs let the extension add methods.
-function plot_smile end
-function plot_term_structure end
-
-export bs_price, implied_vol, bs_greeks,
-    bs_delta, bs_gamma, bs_vega, bs_theta, bs_rho, bs_vanna, bs_volga,
-    baw_price, baw_early_exercise_premium, crr_price,
-    fit_svi, fit_surface, surface_vol, svi_vol, svi_total_var,
-    check_arbitrage, durrleman_g,
-    heston_cf, heston_price, heston_vols, calibrate_heston,
-    bates_cf, bates_price, bates_vols, calibrate_bates,
-    fft_price, bs_cf,
-    fetch_chain, parse_chain, clean_chain, otm_quotes,
-    imply_dividend_yield, chain_to_json, chain_from_json,
-    sukuk_price, sukuk_ytm,
-    plot_smile, plot_term_structure
+export sukuk_price, sukuk_ytm,
+    CashFlow, SukukTerms, yearfrac, distribution_dates, payment_schedule,
+    remaining_cashflows, accrued_profit,
+    ZeroCurve, zero_rate, discount, forward_rate, par_rate, bootstrap,
+    price_from_cashflows, ytm_from_price, current_yield,
+    macaulay_duration, modified_duration, convexity, dv01,
+    price_under_shift,
+    Holding, portfolio_value, weighted_ytm, weighted_duration,
+    weighted_convexity
 
 end

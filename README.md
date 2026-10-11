@@ -1,88 +1,58 @@
 # Volkit
 
-I kept rewriting the same options math in every research repo: Black Scholes here, an SVI fit there, a Heston pricer somewhere else. Copy pasted code rots. So I pulled the good parts into one library I can actually depend on. This is the craft counterpart to my research code: same math, clean API, tested.
+Fixed-income analytics for sukuk, in Julia. I wanted one clean library for the instruments I actually care about: pricing a fixed-profit-rate sukuk from its cash flows, building a profit-rate curve from published auction results, and measuring duration and convexity the way a portfolio manager would. No derivatives anywhere in this repo. Just cash flows, curves, and risk.
 
 ```julia
-using Volkit
+using Volkit, Dates
 
-bs_price(100.0, 100.0, 1.0, 0.05, 0.2; kind=:call)  # 10.450584
-bs_greeks(100.0, 100.0, 1.0, 0.05, 0.2)              # delta gamma vega theta rho vanna volga
-
-params, info = fit_svi(strikes, vols, T, S0, r)
-check_arbitrage(params).butterfly_ok                 # true
-
-hparams, hinfo = calibrate_heston(strikes, vols, T, S0, r)
-fft_price(100.0, 100.0, 1.0, 0.05; sigma=0.25)       # agrees with closed form to 4e-8
+t = SukukTerms("UAE retail T-Sukuk 2031", 1000.0, 0.0506,
+               Date(2026, 9, 30), Date(2031, 9, 30), 2, "ijara")
+cfs = payment_schedule(t)          # 10 dated cash flows
+y = ytm_from_price(cfs, 1000.0, Date(2026, 10, 10))
+macaulay_duration(cfs, y, Date(2026, 10, 10))   # 4.4541 years
 ```
 
 ## What it does
 
 | File | Contents |
 |---|---|
-| `black_scholes.jl` | Closed form prices, delta gamma vega theta rho, vanna volga, Newton implied vol with bisection fallback, continuous dividend yield `q` throughout |
-| `american.jl` | Barone Adesi Whaley (1987) approximation for American calls and puts, early exercise premium, plus an exact Cox Ross Rubinstein binomial tree as the benchmark |
-| `marketdata.jl` | CBOE delayed option chain fetch, parsing, liquidity cleaning, OTM selection, dividend yield from put call parity |
-| `svi.jl` | Raw SVI (Gatheral) slice fits with multi start LBFGS, Durrleman butterfly penalty, calendar spread penalty across expiries |
-| `heston.jl` | Characteristic function (Little trap), Fourier inversion pricing, multi start calibration to a vol smile, dividend yield support |
-| `bates.jl` | Bates (1996) stochastic vol plus log normal jumps, characteristic function, Fourier pricing, multi start calibration; the answer to short dated skew |
-| `sukuk.jl` | Fixed profit rate sukuk pricing and yield to maturity from present value of distributions and principal |
-| `fft.jl` | Carr Madan FFT pricing from any characteristic function, cubic spline to arbitrary strikes |
+| `sukuk.jl` | Fixed-profit-rate pricing and yield to maturity by bisection |
+| `cashflows.jl` | Distribution schedules for ijara, murabaha and wakala structures, bullet and installment shapes, 30/360 and Actual/365 day counts, accrued profit |
+| `curve.jl` | Zero profit-rate curves, discount factors, forward rates, par rates, bootstrapping from market instruments |
+| `analytics.jl` | Yield to maturity, current yield, Macaulay and modified duration, convexity, DV01, parallel shift repricing |
+| `portfolio.jl` | Market-value-weighted yield, duration and convexity across holdings |
 
-Plotting (`plot_smile`, `plot_term_structure`) lives in a package extension: install Plots and it just works, skip it and the core never loads it.
-
-## Install
-
-```julia
-using Pkg
-Pkg.develop(path="path/to/volkit")
-```
+Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk pays lease-based periodic distributions with principal at maturity. A murabaha sukuk reflects a deferred sale: cost plus agreed profit, paid as a bullet or in installments. A wakala sukuk pays distributions from an agency-managed pool. The library models the cash-flow shapes that follow from each structure. Nothing more.
 
 ## Measured results
 
-All numbers below come from `examples/demo.jl`, run on 2026-10-10. Synthetic data throughout: I fit the library to smiles generated from known parameters and checked what came back.
+All numbers below come from `examples/demo.jl`, run on 2026-10-10.
 
-SVI recovery. True params (0.04, 0.4, -0.4, 0.0, 0.2), 15 strikes, T 0.5. Fit returned (0.04, 0.4, -0.4, -0.0, 0.2). RMSE on vols 3.63e-11. Butterfly check passes.
+I bootstrapped a short end zero curve from real published data: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The curve recovers every auction point exactly, as a bootstrap should:
 
-Heston calibration. True params (v0 0.04, kappa 2.0, theta 0.04, xi 0.35, rho -0.6), 9 strikes, T 0.5. Fit returned (0.0404, 2.0181, 0.0393, 0.3503, -0.5996). RMSE on vols 9.74e-07, max abs error 1.44e-06. Four seeded starts plus a polish.
+| Pillar | Zero rate |
+|---|---|
+| 0.085y | 3.8038% |
+| 0.247y | 3.8219% |
+| 0.496y | 3.7843% |
+| 1.000y | 3.3918% |
 
-FFT agreement. Carr Madan against closed form Black Scholes: max relative error 4.24e-08 across five strikes. FFT against Heston quadrature pricing: max relative error 5.55e-08.
+The 6m to 12m forward rate is 3.0026%. The published 12m clearing rate sat below the 6m rate, and the curve keeps that shape.
 
-The full suite (`Pkg.test()`) covers put call parity, greeks against finite differences, implied vol roundtrips, SVI recovery with arbitrage checks, Heston calibration recovery, Bates properties and real data calibration, CRR tree convergence and American bounds, sukuk pricing and yield roundtrips, both FFT agreements, CBOE fixture parsing and cleaning, BAW against the binomial tree, SVI arbitrage on real data, and Heston convergence on real data. Green.
+I also ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued 2026-10-10 at a clean price of 1000 on 1000 face: YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices it to 957.66. Accrued profit at settlement: 1.41.
+
+The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
+
+The full suite (`Pkg.test()`) is 83 tests: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. Green.
 
 ## Real data
 
-`examples/demo_real.jl` runs the full pipeline on SPY options from CBOE. The feed is free and needs no key, but it is delayed about 15 minutes. The script uses a committed snapshot by default (`data/spy_chain_2026-10-10/`, one file per expiry, 1,432 quotes across the three demo expiries) so it reproduces offline. Pass `--live` to refetch and save a new snapshot.
-
-All numbers below are from 2026-10-10. SPY spot 778.57. I assumed r = 0.04. Cleaning (drop zero or crossed bids, wide spreads, thin volume and open interest) kept 476 of 1,432 quotes. Dividend yields come from put call parity on near ATM pairs: 0.0033 for Oct 16, 0.0000 for Nov 20, 0.0047 for Dec 18. The Nov expiry falls between SPY dividend dates, so zero is what the market says.
-
-SVI surface on the three nearest monthly expiries, OTM quotes only:
-
-| Expiry | T | Quotes | Vol RMSE | Butterfly |
-|---|---|---|---|---|
-| 2026-10-16 | 0.016 | 102 | 0.0078 | clean |
-| 2026-11-20 | 0.112 | 135 | 0.0023 | clean |
-| 2026-12-18 | 0.189 | 139 | 0.0037 | clean |
-
-Calendar check passes across all three.
-
-Heston calibration per expiry (25 strikes each):
-
-| Expiry | Vol RMSE | v0 | kappa | theta | xi | rho |
-|---|---|---|---|---|---|---|
-| 2026-10-16 | 0.081 | 0.057 | 0.10 | 0.005 | 0.69 | -0.99 |
-| 2026-11-20 | 0.010 | 0.025 | 0.10 | 0.380 | 1.50 | -0.24 |
-| 2026-12-18 | 0.020 | 0.027 | 0.10 | 0.005 | 0.39 | -0.99 |
-
-The 6 day expiry defeats Heston. A pure diffusion cannot make short dated skew that steep, and several params sit on their bounds. That is a model limitation, not a data problem. Bates (1996) adds log normal jumps to the same stochastic vol, and jumps put mass in the tails instantly, which is exactly what the short end needs.
-
-Bates calibration on 2026-10-16 (25 strikes): vol RMSE 0.0074 against Heston's 0.0809. Fit params: v0 0.0127, kappa 0.10, theta 0.50, xi 0.15, rho -0.99, lambdaJ 0.10, muJ -0.14, sigJ 0.10. Roughly one jump every ten years in the calibration, downward on average. The short dated gap is closed.
-
-American exercise. SPY options are American. I price them with Barone Adesi and Whaley, an analytic approximation, and I keep an exact Cox Ross Rubinstein tree in the library as the benchmark. BAW matches the 400 step tree to within 2% on my tests. At the money the early exercise premium is zero for calls and 59 to 256 bps of mid for puts across the three expiries. Small enough that European IVs are a fair summary of the smile, and I report the premium so you can judge the bias yourself.
+Two public sources feed the demo. The IILM auction results are published clearing profit rates from January 2026, archived in `data/iilm_2026-01.json` with the source note. I treat them as simple annualized discount rates (Actual/365); that is a documented modeling choice, not a quoted convention. The UAE retail sukuk terms (5.06%, semi-annual, 2031-09-30 maturity) come from Nasdaq Dubai listing reports. Everything else in the demo is synthetic and labeled so.
 
 ## Honest limitations
 
-The synthetic results above are clean by construction. Real data adds noise. CBOE quotes are delayed about 15 minutes, so this is not for live trading. I assume r = 0.04; short rates move and you should set your own. Dividends are a continuous yield backed out of put call parity, which approximates discrete quarterly payments. American exercise uses the Barone Adesi Whaley approximation: it is weakest on deep in the money puts close to expiry, and the exact tree is there when you need it. Bates fits short dated smiles where Heston cannot, at the cost of 8 parameters and a slower calibration. My liquidity filters (min volume, min open interest, max spread) shape every fit, so different choices give different numbers. The FFT grid assumes strikes well inside the log strike range; it errors loudly otherwise.
+The IILM curve covers only the short end: one month to one year, four points, one auction date. It is a primary-market snapshot, not a live secondary curve. Different credits sit at different levels, so do not mix these pillars with other issuers' paper. The UAE example uses published issuance terms; I have no secondary prices for it, so its risk numbers are computed at par. Day-count and compounding conventions are documented choices; check them against your market before relying on them. This is analytics code, not investment advice.
 
 ## References
 
-Gatheral (2004) on SVI. Durrleman (2005) on the butterfly condition. Carr and Madan (1999) on FFT pricing. Heston (1993) on stochastic volatility. Bates (1996) on jumps with stochastic volatility. Albrecher et al. on the Little trap formulation of the characteristic function. Barone Adesi and Whaley (1987) on the American approximation. Cox Ross and Rubinstein (1979) on the binomial tree.
+IILM short-term sukuk auction results, January 2026. Nasdaq Dubai sukuk listing announcements. Standard fixed-income texts for duration and convexity arithmetic.

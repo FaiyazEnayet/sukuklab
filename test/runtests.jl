@@ -199,27 +199,12 @@ using Dates
         C = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:call)
         P = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:put)
         @test S0 - K - 1e-8 <= C - P <= S0 - K * exp(-r * T) + 1e-8
-        # BAW vs Cox-Ross-Rubinstein binomial (400 steps), 2% tolerance.
-        function crr(S0, K, T, r, q, sig, n, kind)
-            dt = T / n
-            u = exp(sig * sqrt(dt)); d = 1 / u
-            p = (exp((r - q) * dt) - d) / (u - d)
-            df = exp(-r * dt)
-            v = [kind == :call ? max(S0 * u^j * d^(n - j) - K, 0.0) :
-                                 max(K - S0 * u^j * d^(n - j), 0.0) for j in 0:n]
-            for i in n-1:-1:0
-                v = [kind == :call ?
-                     max(S0 * u^j * d^(i - j) - K, df * (p * v[j+2] + (1 - p) * v[j+1])) :
-                     max(K - S0 * u^j * d^(i - j), df * (p * v[j+2] + (1 - p) * v[j+1]))
-                     for j in 0:i]
-            end
-            return v[1]
-        end
+        # BAW vs the library Cox-Ross-Rubinstein tree (400 steps), 2% tolerance.
         for (S0, K, T, q, sig, kind) in [(100.0, 100.0, 1.0, 0.02, 0.25, :put),
                                           (100.0, 110.0, 0.5, 0.03, 0.30, :put),
                                           (100.0, 100.0, 1.0, 0.02, 0.25, :call)]
             b = baw_price(S0, K, T, 0.05, sig; q=q, kind=kind)
-            c = crr(S0, K, T, 0.05, q, sig, 400, kind)
+            c = crr_price(S0, K, T, 0.05, sig; q=q, kind=kind, n=400)
             @test abs(b - c) / c < 0.02
         end
     end
@@ -275,6 +260,104 @@ using Dates
                                     polish=true)
         @test isfinite(hinfo.rmse_vol)
         @test hinfo.rmse_vol < 0.05
+    end
+
+    @testset "bates_properties" begin
+        p = (0.04, 2.0, 0.04, 0.35, -0.6)
+        u = collect(range(0.1, 20.0; length=50))
+        # Zero jump intensity: exactly the Heston CF and price.
+        @test bates_cf(u, 0.5, 100.0, 0.05, p..., 0.0, -0.1, 0.2) ≈
+              heston_cf(u, 0.5, 100.0, 0.05, p...)
+        @test bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.0, -0.1, 0.2;
+                          kind=:call) ≈
+              heston_price(100.0, 100.0, 0.5, 0.05, p...; kind=:call)
+        # Martingale: phi(-i) = S0 * exp((r - q) * T), jumps included.
+        @test bates_cf(-im, 0.5, 100.0, 0.05, p..., 0.7, -0.1, 0.2; q=0.01) ≈
+              100.0 * exp((0.05 - 0.01) * 0.5)
+        # Put-call parity.
+        c = bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.7, -0.1, 0.2;
+                        kind=:call)
+        pt = bates_price(100.0, 100.0, 0.5, 0.05, p..., 0.7, -0.1, 0.2;
+                         kind=:put)
+        @test isapprox(c - pt, 100.0 - 100.0 * exp(-0.05 * 0.5); atol=1e-6)
+        # Jumps move short-dated OTM puts: positive jump premium.
+        base = bates_price(100.0, 90.0, 0.1, 0.05, p..., 0.0, -0.1, 0.2;
+                           kind=:put)
+        jumped = bates_price(100.0, 90.0, 0.1, 0.05, p..., 1.0, -0.1, 0.2;
+                             kind=:put)
+        @test jumped > base
+    end
+
+    @testset "bates_real_fixture" begin
+        # Bates on the 6-day Oct-16 smile Heston cannot fit (RMSE 0.081):
+        # jumps must bring it clearly below 0.05.
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
+        chain = chain_from_json(path)
+        clean = clean_chain(chain.quotes)
+        S0, r = chain.spot, 0.04
+        asof = Date(chain.timestamp)
+        e = Date("2026-10-16")
+        T = (e - asof).value / 365
+        q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
+        F = S0 * exp((r - q) * T)
+        otm = otm_quotes(clean, Dict(e => F))
+        ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
+                           kind=x.is_call ? :call : :put) for x in otm]
+        keep = .!isnan.(ivs)
+        ks = [x.strike for x in otm][keep]
+        vs = ivs[keep]
+        idx = unique(round.(Int, range(1, length(ks); length=12)))
+        bp, binfo = calibrate_bates(ks[idx], vs[idx], T, S0, r; q=q, seed=0,
+                                    n_starts=4, polish=true)
+        @test isfinite(binfo.rmse_vol)
+        @test binfo.rmse_vol < 0.05
+        @test length(bp) == 8
+    end
+
+    @testset "crr_properties" begin
+        # Tree converges toward the BAW approximation as steps grow.
+        S0, K, T, r, q, sig = 100.0, 100.0, 1.0, 0.05, 0.03, 0.30
+        b = baw_price(S0, K, T, r, sig; q=q, kind=:put)
+        c200 = crr_price(S0, K, T, r, sig; q=q, kind=:put, n=200)
+        c800 = crr_price(S0, K, T, r, sig; q=q, kind=:put, n=800)
+        @test abs(c800 - b) / b < 0.02
+        @test abs(c200 - b) / b < 0.03
+        # American >= European everywhere (tolerance covers the tree's
+        # sawtooth discretization error, which decays ~1/n).
+        for (s, k, t, qq, kind) in [(100.0, 100.0, 1.0, 0.02, :call),
+                                   (100.0, 100.0, 1.0, 0.02, :put),
+                                   (90.0, 100.0, 0.5, 0.03, :put)]
+            am = crr_price(s, k, t, r, sig; q=qq, kind=kind, n=600)
+            eu = bs_price(s, k, t, r, sig; q=qq, kind=kind)
+            @test am >= eu - 0.01
+        end
+        # American put-call parity bounds (no dividends).
+        C = crr_price(100.0, 105.0, 0.5, 0.05, 0.3; q=0.0, kind=:call, n=300)
+        P = crr_price(100.0, 105.0, 0.5, 0.05, 0.3; q=0.0, kind=:put, n=300)
+        @test 100.0 - 105.0 - 1e-6 <= C - P <= 100.0 - 105.0 * exp(-0.05 * 0.5) + 1e-6
+        # At expiry it is the payoff.
+        @test crr_price(110.0, 100.0, 0.0, 0.05, 0.3; kind=:call, n=10) == 10.0
+        @test crr_price(90.0, 100.0, 0.0, 0.05, 0.3; kind=:put, n=10) == 10.0
+    end
+
+    @testset "sukuk" begin
+        # Par: profit rate equals yield.
+        @test isapprox(sukuk_price(100, 0.05, 0.05, 2.0), 100.0; atol=1e-8)
+        # Manual present value.
+        pv = sum(2.5 / 1.025^k for k in 1:4) + 100 / 1.025^4
+        @test isapprox(sukuk_price(100, 0.05, 0.05, 2.0), pv; atol=1e-8)
+        # Yield roundtrip.
+        y = sukuk_ytm(98.0, 100, 0.05, 2.0)
+        @test isapprox(sukuk_price(100, 0.05, y, 2.0), 98.0; atol=1e-6)
+        # Zero profit rate: pure discount.
+        @test isapprox(sukuk_price(100, 0.0, 0.05, 2.0), 100 / 1.025^4;
+                       atol=1e-8)
+        # Higher yield means lower price.
+        @test sukuk_price(100, 0.05, 0.06, 2.0) < sukuk_price(100, 0.05, 0.04, 2.0)
+        # Bad inputs.
+        @test_throws ArgumentError sukuk_price(-100, 0.05, 0.05, 2.0)
+        @test_throws ArgumentError sukuk_price(100, 0.05, 0.05, 0.0)
+        @test isnan(sukuk_ytm(-5.0, 100, 0.05, 2.0))
     end
 
 end

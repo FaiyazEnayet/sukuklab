@@ -5,7 +5,7 @@
 #
 # Pipeline: fetch -> clean -> implied dividend yields from put-call parity
 # -> OTM smiles -> SVI surface fit -> per-expiry Heston calibration ->
-# BAW early-exercise diagnostic.
+# Bates (jumps) on the shortest expiry -> BAW early-exercise diagnostic.
 
 using Volkit
 using Dates
@@ -82,6 +82,7 @@ function main()
     # Heston per expiry (subsampled strikes: the smile is smooth and the
     # Fourier pricer is expensive; 25 points capture it fully)
     println("\nHeston calibration (per expiry, ~25 strikes each):")
+    heston_rmses = Float64[]
     for (i, e) in enumerate(chosen)
         s = smiles[i]
         idx = unique(round.(Int, range(1, length(s.strikes); length=25)))
@@ -89,11 +90,28 @@ function main()
         hp, hinfo = calibrate_heston(ks, vs, Ts[i], S0, RISK_FREE;
                                      q=qs[i], seed=0, n_starts=4,
                                      n_grid=2048, u_max=100.0, polish=true)
+        push!(heston_rmses, hinfo.rmse_vol)
         println("  $e  vol RMSE=$(round(hinfo.rmse_vol; digits=5))")
         println("      v0=$(round(hp[1]; digits=4)) kappa=$(round(hp[2]; digits=3)) " *
                 "theta=$(round(hp[3]; digits=4)) xi=$(round(hp[4]; digits=3)) " *
                 "rho=$(round(hp[5]; digits=3))")
     end
+
+    # Bates on the shortest expiry: jumps fix the short-dated skew that
+    # pure diffusion cannot make.
+    println("\nBates calibration on $(chosen[1]) (jumps for short-dated skew):")
+    s = smiles[1]
+    idx = unique(round.(Int, range(1, length(s.strikes); length=25)))
+    ks, vs = s.strikes[idx], s.vols[idx]
+    bp, binfo = calibrate_bates(ks, vs, Ts[1], S0, RISK_FREE;
+                                q=qs[1], seed=0, n_starts=4, polish=true)
+    println("  vol RMSE=$(round(binfo.rmse_vol; digits=5)) " *
+            "vs Heston $(round(heston_rmses[1]; digits=5))")
+    println("  v0=$(round(bp[1]; digits=4)) kappa=$(round(bp[2]; digits=3)) " *
+            "theta=$(round(bp[3]; digits=4)) xi=$(round(bp[4]; digits=3)) " *
+            "rho=$(round(bp[5]; digits=3))")
+    println("  lambdaJ=$(round(bp[6]; digits=3)) muJ=$(round(bp[7]; digits=4)) " *
+            "sigJ=$(round(bp[8]; digits=4))")
 
     # BAW early-exercise diagnostic on ATM options
     println("\nAmerican early-exercise premium (BAW) at ATM, in bps of mid:")

@@ -31,14 +31,14 @@ function heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=0.0)
     return exp.(C .+ D .* v0 .+ iu .* log(S0))
 end
 
-function _prob_integrals(S0, K, T, r, v0, kappa, theta, xi, rho; q=0.0, n_grid=8192, u_max=120.0)
+function _prob_integrals_cf(cf, S0, K, T, r, q; n_grid=8192, u_max=120.0)
     logK = log.(K)
     u = collect(range(0.0, u_max, length=n_grid))
     u[1] = 1e-10
     du = u[2] - u[1]
-    phi = heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=q)
-    phi_m1 = heston_cf(u .- im, T, S0, r, v0, kappa, theta, xi, rho; q=q)
-    phi_neg_i = S0 * exp((r - q) * T)
+    phi = cf(u)
+    phi_m1 = cf(u .- im)
+    phi_neg_i = real(cf(-im))  # S0 * exp((r - q) * T) for a martingale model
     # (n_grid, n_strikes)
     eu = exp.(-im .* u .* logK')
     iu = im .* u
@@ -48,6 +48,11 @@ function _prob_integrals(S0, K, T, r, v0, kappa, theta, xi, rho; q=0.0, n_grid=8
     P2 = 0.5 .+ vec(trap(f2)) ./ pi
     P1 = 0.5 .+ vec(trap(f1)) ./ pi
     return P1, P2
+end
+
+function _prob_integrals(S0, K, T, r, v0, kappa, theta, xi, rho; q=0.0, n_grid=8192, u_max=120.0)
+    cf = u -> heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=q)
+    return _prob_integrals_cf(cf, S0, K, T, r, q; n_grid=n_grid, u_max=u_max)
 end
 
 """

@@ -112,3 +112,34 @@ function baw_early_exercise_premium(S0, K, T, r, sigma; q=0.0, kind=:call)
     baw_price(S0, K, T, r, sigma; q=q, kind=kind) -
         bs_price(S0, K, T, r, sigma; q=q, kind=kind)
 end
+
+"""
+    crr_price(S0, K, T, r, sigma; q=0.0, kind=:call, n=200)
+
+American option price on a Cox-Ross-Rubinstein binomial tree with `n`
+steps and optimal early exercise at every node. This is the exact
+complement to `baw_price`: the tree converges to the true American
+value as `n` grows, so it is the benchmark I check BAW against. Slow
+for large `n`; use BAW for speed and the tree for truth.
+"""
+function crr_price(S0, K, T, r, sigma; q=0.0, kind=:call, n=200)
+    S0, K, T = float(S0), float(K), float(T)
+    if T <= 0
+        return kind === :call ? max(S0 - K, 0.0) : max(K - S0, 0.0)
+    end
+    if kind !== :call && kind !== :put
+        throw(ArgumentError("kind must be :call or :put"))
+    end
+    dt = T / n
+    u = exp(sigma * sqrt(dt))
+    d = 1 / u
+    p = (exp((r - q) * dt) - d) / (u - d)
+    df = exp(-r * dt)
+    exercise(ST) = kind === :call ? max(ST - K, 0.0) : max(K - ST, 0.0)
+    v = [exercise(S0 * u^j * d^(n - j)) for j in 0:n]
+    for i in n-1:-1:0
+        v = [max(exercise(S0 * u^j * d^(i - j)),
+                 df * (p * v[j+2] + (1 - p) * v[j+1])) for j in 0:i]
+    end
+    return v[1]
+end

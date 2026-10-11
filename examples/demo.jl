@@ -1,4 +1,4 @@
-# Volkit demo: sukuk and fixed-income analytics on real published terms.
+# SukukLab demo: sukuk and fixed-income analytics on real published terms.
 #
 # Real inputs used here, both public:
 # 1. IILM short-term sukuk auction, January 2026 (reported 2026-01-13).
@@ -11,7 +11,7 @@
 # The three-holding portfolio at the end is illustrative and labeled so.
 
 using Dates
-using Volkit
+using SukukLab
 
 println("== 1. Short-end profit-rate curve from the IILM auction ==")
 anchor = Date(2026, 1, 13)

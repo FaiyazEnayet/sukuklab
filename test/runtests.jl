@@ -1,8 +1,8 @@
 using Test
-using Volkit
+using SukukLab
 using Dates
 
-@testset "Volkit" begin
+@testset "SukukLab" begin
 
     @testset "sukuk_price" begin
         # Par: price equals face when yield matches the profit rate.
@@ -234,6 +234,41 @@ using Dates
         @test weighted_ytm([hs[1]]) ≈ 0.05
         @test_throws ArgumentError weighted_ytm(Holding[])
         @test_throws ArgumentError Holding("x", -1.0, 0.05, 4.0, 20.0)
+    end
+
+    @testset "notebook" begin
+        # notebook.jl must stay a valid Pluto file: parses cleanly, cell ids
+        # unique, footer order matches the cells, every cell body parses.
+        parses_ok(s) = try
+            pos = firstindex(s)
+            while true
+                ex, pos = Meta.parse(s, pos; raise=true)
+                ex === nothing && break
+            end
+            true
+        catch
+            false
+        end
+        nb = joinpath(@__DIR__, "..", "notebook.jl")
+        @test isfile(nb)
+        text = read(nb, String)
+        @test parses_ok(text)
+        ids = [m.captures[1]
+               for m in eachmatch(r"^# ╔═╡ ([0-9a-f-]{36})$"m, text)]
+        @test length(ids) == length(unique(ids)) > 0
+        order = [m.captures[1]
+                 for m in eachmatch(r"^# ╠═╡ ([0-9a-f-]{36})$"m, text)]
+        @test ids == order
+        @test occursin("PLUTO_PROJECT_TOML_CONTENTS", text)
+        @test occursin("PLUTO_MANIFEST_TOML_CONTENTS", text)
+        @test occursin("PlutoUI", text)
+        # The repo was renamed: no volkit mentions may remain.
+        @test !occursin(r"volkit"i, text)
+        # Every cell body parses on its own.
+        bodies = split(text, r"^# ╔═╡ [0-9a-f-]{36}$"m)
+        cells = [split(b, r"^# [╠╙].*$"m)[1] for b in bodies[2:end]]
+        @test length(cells) == length(ids)
+        @test all(parses_ok.(cells))
     end
 
 end

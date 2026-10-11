@@ -49,9 +49,9 @@ The full suite (`Pkg.test()`) covers put call parity, greeks against finite diff
 
 ## Real data
 
-`examples/demo_real.jl` runs the full pipeline on SPY options from CBOE. The feed is free and needs no key, but it is delayed about 15 minutes. The script uses a committed snapshot by default (`data/spy_chain_2026-10-10.json`, 12,894 quotes) so it reproduces offline. Pass `--live` to refetch and save a new snapshot.
+`examples/demo_real.jl` runs the full pipeline on SPY options from CBOE. The feed is free and needs no key, but it is delayed about 15 minutes. The script uses a committed snapshot by default (`data/spy_chain_2026-10-10/`, one file per expiry, 1,432 quotes across the three demo expiries) so it reproduces offline. Pass `--live` to refetch and save a new snapshot.
 
-All numbers below are from 2026-10-10. SPY spot 778.57. I assumed r = 0.04. Cleaning (drop zero or crossed bids, wide spreads, thin volume and open interest) kept 1,893 of 12,894 quotes. Dividend yields come from put call parity on near ATM pairs: 0.0033 for Oct 16, 0.0000 for Nov 20, 0.0047 for Dec 18. The Nov expiry falls between SPY dividend dates, so zero is what the market says.
+All numbers below are from 2026-10-10. SPY spot 778.57. I assumed r = 0.04. Cleaning (drop zero or crossed bids, wide spreads, thin volume and open interest) kept 476 of 1,432 quotes. Dividend yields come from put call parity on near ATM pairs: 0.0033 for Oct 16, 0.0000 for Nov 20, 0.0047 for Dec 18. The Nov expiry falls between SPY dividend dates, so zero is what the market says.
 
 SVI surface on the three nearest monthly expiries, OTM quotes only:
 
@@ -78,6 +78,10 @@ American exercise. SPY options are American. I price them with Barone Adesi and 
 ## Honest limitations
 
 The synthetic results above are clean by construction. Real data adds noise. CBOE quotes are delayed about 15 minutes, so this is not for live trading. I assume r = 0.04; short rates move and you should set your own. Dividends are a continuous yield backed out of put call parity, which approximates discrete quarterly payments. American exercise uses the Barone Adesi Whaley approximation: it is weakest on deep in the money puts close to expiry. Heston cannot fit very short dated smiles (see the Oct 16 RMSE above); that needs jumps. My liquidity filters (min volume, min open interest, max spread) shape every fit, so different choices give different numbers. The FFT grid assumes strikes well inside the log strike range; it errors loudly otherwise.
+
+## A note on Sharia compliance
+
+Most scholars consider trading conventional options haram because of gharar. This package does not trade anything. It is a volatility toolkit. The same SVI, Heston, and FFT machinery is used to price sukuk with embedded options and to manage risk in Islamic banks. The math is a tool. Whether your use is halal depends on the contracts you touch, not the formulas. I am not a scholar. If you need a ruling, ask one.
 
 ## References
 

@@ -1,5 +1,6 @@
 using Test
 using Volkit
+using Dates
 
 @testset "Volkit" begin
 
@@ -132,6 +133,148 @@ using Volkit
         fq = fft_price(S0, strikes, T, r; cf=cf)
         hq = heston_price(S0, strikes, T, r, v0, kappa, theta, xi, rho; kind=:call)
         @test maximum(abs.(fq .- hq) ./ hq) < 1e-3
+    end
+
+    @testset "marketdata_fixture" begin
+        # Committed CBOE snapshot loads offline; no network in tests.
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        chain = chain_from_json(path)
+        @test chain.ticker == "SPY"
+        @test chain.spot ≈ 778.57
+        @test length(chain.quotes) == 12894
+        q0 = chain.quotes[1]
+        @test q0.expiry isa Date && q0.strike > 0.0
+        @test q0.bid >= 0.0 && q0.ask >= q0.bid
+        # round-trip through JSON preserves everything
+        tmp = tempname() * ".json"
+        chain_to_json(chain, tmp)
+        chain2 = chain_from_json(tmp)
+        @test chain2.spot == chain.spot
+        @test length(chain2.quotes) == length(chain.quotes)
+        @test chain2.quotes[1] == chain.quotes[1]
+        rm(tmp)
+    end
+
+    @testset "marketdata_cleaning" begin
+        e = Date("2026-12-18")
+        mk = (bid, ask, vol, oi; strike=780.0, call=true) ->
+            (expiry=e, strike=strike, is_call=call, bid=bid, ask=ask,
+             volume=vol, open_interest=oi, cboe_iv=0.15, theo=0.0)
+        good = mk(5.0, 5.2, 100.0, 500.0)
+        rows = [
+            good,                                   # kept
+            mk(0.0, 0.5, 100.0, 500.0),             # zero bid: dropped
+            mk(-1.0, 0.5, 100.0, 500.0),            # negative bid: dropped
+            mk(5.5, 5.0, 100.0, 500.0),             # crossed: dropped
+            mk(1.0, 6.0, 100.0, 500.0),             # spread 6x: dropped
+            mk(5.0, 5.2, 0.0, 500.0),               # no volume: dropped
+            mk(5.0, 5.2, 100.0, 0.0),               # no OI: dropped
+        ]
+        out = clean_chain(rows; min_volume=1.0, min_open_interest=1.0)
+        @test length(out) == 1
+        @test out[1].mid ≈ 5.1
+        @test out[1].strike == 780.0
+        # relaxed spread threshold keeps the wide-spread row too
+        out2 = clean_chain(rows; min_volume=1.0, min_open_interest=1.0,
+                           max_spread_frac=2.0)
+        @test length(out2) == 2
+    end
+
+    @testset "baw_properties" begin
+        # American >= European everywhere (calls and puts, with dividends).
+        for (S0, K, T, r, q, sig, kind) in [
+                (100.0, 100.0, 1.0, 0.05, 0.02, 0.25, :call),
+                (100.0, 100.0, 1.0, 0.05, 0.02, 0.25, :put),
+                (90.0, 100.0, 0.5, 0.05, 0.03, 0.30, :put),
+                (110.0, 100.0, 0.25, 0.05, 0.01, 0.40, :call)]
+            am = baw_price(S0, K, T, r, sig; q=q, kind=kind)
+            eu = bs_price(S0, K, T, r, sig; q=q, kind=kind)
+            @test am >= eu - 1e-10
+        end
+        # American call without dividends is never exercised early.
+        @test baw_price(100, 100, 1.0, 0.05, 0.25; q=0.0, kind=:call) ≈
+              bs_price(100, 100, 1.0, 0.05, 0.25; q=0.0, kind=:call) rtol=1e-2
+        # American put-call parity bounds (no dividends).
+        S0, K, T, r = 100.0, 105.0, 0.5, 0.05
+        C = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:call)
+        P = baw_price(S0, K, T, r, 0.3; q=0.0, kind=:put)
+        @test S0 - K - 1e-8 <= C - P <= S0 - K * exp(-r * T) + 1e-8
+        # BAW vs Cox-Ross-Rubinstein binomial (400 steps), 2% tolerance.
+        function crr(S0, K, T, r, q, sig, n, kind)
+            dt = T / n
+            u = exp(sig * sqrt(dt)); d = 1 / u
+            p = (exp((r - q) * dt) - d) / (u - d)
+            df = exp(-r * dt)
+            v = [kind == :call ? max(S0 * u^j * d^(n - j) - K, 0.0) :
+                                 max(K - S0 * u^j * d^(n - j), 0.0) for j in 0:n]
+            for i in n-1:-1:0
+                v = [kind == :call ?
+                     max(S0 * u^j * d^(i - j) - K, df * (p * v[j+2] + (1 - p) * v[j+1])) :
+                     max(K - S0 * u^j * d^(i - j), df * (p * v[j+2] + (1 - p) * v[j+1]))
+                     for j in 0:i]
+            end
+            return v[1]
+        end
+        for (S0, K, T, q, sig, kind) in [(100.0, 100.0, 1.0, 0.02, 0.25, :put),
+                                          (100.0, 110.0, 0.5, 0.03, 0.30, :put),
+                                          (100.0, 100.0, 1.0, 0.02, 0.25, :call)]
+            b = baw_price(S0, K, T, 0.05, sig; q=q, kind=kind)
+            c = crr(S0, K, T, 0.05, q, sig, 400, kind)
+            @test abs(b - c) / c < 0.02
+        end
+    end
+
+    @testset "svi_real_fixture" begin
+        # SVI surface on the real SPY snapshot is arbitrage-free.
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        chain = chain_from_json(path)
+        clean = clean_chain(chain.quotes)
+        S0, r = chain.spot, 0.04
+        asof = Date(chain.timestamp)
+        expiries = [Date("2026-10-16"), Date("2026-11-20"), Date("2026-12-18")]
+        Ts, qs, Ks, Vs = Float64[], Float64[], [], []
+        for e in expiries
+            T = (e - asof).value / 365
+            q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
+            F = S0 * exp((r - q) * T)
+            otm = otm_quotes(clean, Dict(e => F))
+            ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
+                               kind=x.is_call ? :call : :put) for x in otm]
+            keep = .!isnan.(ivs)
+            push!(Ts, T); push!(qs, q)
+            push!(Ks, [x.strike for x in otm][keep])
+            push!(Vs, ivs[keep])
+        end
+        _, sinfo = fit_surface(Ks, Vs, Ts, S0, r; q=qs, n_restarts=2, seed=0)
+        for si in sinfo.slice_infos
+            @test si.butterfly_ok
+        end
+        @test sinfo.calendar_ok
+    end
+
+    @testset "heston_real_fixture" begin
+        # Heston converges on the real Nov-2026 smile; RMSE sane (< 5 vol pts).
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        chain = chain_from_json(path)
+        clean = clean_chain(chain.quotes)
+        S0, r = chain.spot, 0.04
+        asof = Date(chain.timestamp)
+        e = Date("2026-11-20")
+        T = (e - asof).value / 365
+        q = max(imply_dividend_yield(clean, e, S0, r, T), 0.0)
+        F = S0 * exp((r - q) * T)
+        otm = otm_quotes(clean, Dict(e => F))
+        ivs = [implied_vol(x.mid, S0, x.strike, T, r; q=q,
+                           kind=x.is_call ? :call : :put) for x in otm]
+        keep = .!isnan.(ivs)
+        ks = [x.strike for x in otm][keep]
+        vs = ivs[keep]
+        idx = unique(round.(Int, range(1, length(ks); length=15)))
+        _, hinfo = calibrate_heston(ks[idx], vs[idx], T, S0, r; q=q, seed=0,
+                                    n_starts=3, n_grid=2048, u_max=100.0,
+                                    polish=true)
+        @test isfinite(hinfo.rmse_vol)
+        @test hinfo.rmse_vol < 0.05
     end
 
 end

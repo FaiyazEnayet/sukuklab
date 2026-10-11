@@ -13,32 +13,32 @@ keeps the complex logarithm on its principal branch.
 """
 
 """
-    heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho)
+    heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=0.0)
 
 Characteristic function phi(u) = E[exp(i u log S_T)].
-Satisfies phi(-i) = S0 * exp(rT). Vectorized over u.
+Satisfies phi(-i) = S0 * exp((r-q)T). Vectorized over u.
 """
-function heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho)
+function heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=0.0)
     u_ = complex.(u)
     iu = im .* u_
     d = sqrt.((rho * xi .* iu .- kappa) .^ 2 .- xi^2 .* (-iu .- u_ .^ 2))
     g = (kappa .- rho * xi .* iu .- d) ./ (kappa .- rho * xi .* iu .+ d)
     exp_dt = exp.(-d .* T)
-    C = r .* iu .* T .+ kappa * theta / xi^2 .* (
+    C = (r - q) .* iu .* T .+ kappa * theta / xi^2 .* (
         (kappa .- rho * xi .* iu .- d) .* T .- 2 .* log.((1 .- g .* exp_dt) ./ (1 .- g))
     )
     D = (kappa .- rho * xi .* iu .- d) ./ xi^2 .* (1 .- exp_dt) ./ (1 .- g .* exp_dt)
     return exp.(C .+ D .* v0 .+ iu .* log(S0))
 end
 
-function _prob_integrals(S0, K, T, r, v0, kappa, theta, xi, rho; n_grid=8192, u_max=120.0)
+function _prob_integrals(S0, K, T, r, v0, kappa, theta, xi, rho; q=0.0, n_grid=8192, u_max=120.0)
     logK = log.(K)
     u = collect(range(0.0, u_max, length=n_grid))
     u[1] = 1e-10
     du = u[2] - u[1]
-    phi = heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho)
-    phi_m1 = heston_cf(u .- im, T, S0, r, v0, kappa, theta, xi, rho)
-    phi_neg_i = S0 * exp(r * T)
+    phi = heston_cf(u, T, S0, r, v0, kappa, theta, xi, rho; q=q)
+    phi_m1 = heston_cf(u .- im, T, S0, r, v0, kappa, theta, xi, rho; q=q)
+    phi_neg_i = S0 * exp((r - q) * T)
     # (n_grid, n_strikes)
     eu = exp.(-im .* u .* logK')
     iu = im .* u
@@ -56,16 +56,17 @@ end
 European option price under Heston via Fourier inversion.
 """
 function heston_price(S0, K, T, r, v0, kappa, theta, xi, rho;
-                      kind=:call, n_grid=8192, u_max=120.0)
+                      q=0.0, kind=:call, n_grid=8192, u_max=120.0)
     scalar = K isa Number
     K_ = scalar ? [float(K)] : float.(K)
-    P1, P2 = _prob_integrals(S0, K_, T, r, v0, kappa, theta, xi, rho;
+    P1, P2 = _prob_integrals(S0, K_, T, r, v0, kappa, theta, xi, rho; q=q,
                              n_grid=n_grid, u_max=u_max)
-    call = S0 .* P1 .- K_ .* exp(-r * T) .* P2
+    disc_q, disc_r = exp(-q * T), exp(-r * T)
+    call = S0 .* disc_q .* P1 .- K_ .* disc_r .* P2
     out = if kind === :call
         call
     elseif kind === :put
-        call .- S0 .+ K_ .* exp(-r * T)
+        call .- S0 .* disc_q .+ K_ .* disc_r
     else
         throw(ArgumentError("kind must be :call or :put"))
     end
@@ -74,10 +75,10 @@ end
 
 """Implied vols of Heston model call prices."""
 function heston_vols(S0, strikes, T, r, v0, kappa, theta, xi, rho;
-                     n_grid=4096, u_max=100.0)
+                     q=0.0, n_grid=4096, u_max=100.0)
     prices = heston_price(S0, strikes, T, r, v0, kappa, theta, xi, rho;
-                          kind=:call, n_grid=n_grid, u_max=u_max)
-    return implied_vol.(prices, S0, strikes, T, r; kind=:call)
+                          q=q, kind=:call, n_grid=n_grid, u_max=u_max)
+    return implied_vol.(prices, S0, strikes, T, r; q=q, kind=:call)
 end
 
 const HESTON_BOUNDS = [
@@ -89,13 +90,14 @@ const HESTON_BOUNDS = [
 ]
 
 """
-    calibrate_heston(strikes, vols, T, S0, r; seed=0, n_starts=12, n_grid=4096)
+    calibrate_heston(strikes, vols, T, S0, r; q=0.0, seed=0, n_starts=12,
+                     n_grid=4096)
 
 Calibrate Heston to a vol smile by least squares on implied vols:
 seeded multi-start local optimization, best start wins, then a final
 polish. Returns (params, info) with params = (v0, kappa, theta, xi, rho).
 """
-function calibrate_heston(strikes, vols, T, S0, r; seed=0, n_starts=12,
+function calibrate_heston(strikes, vols, T, S0, r; q=0.0, seed=0, n_starts=12,
                            n_grid=4096, u_max=100.0, polish=true)
     strikes = float.(strikes)
     vols = float.(vols)
@@ -106,7 +108,7 @@ function calibrate_heston(strikes, vols, T, S0, r; seed=0, n_starts=12,
         v0, kappa, theta, xi, rho = x
         mv = try
             heston_vols(S0, strikes, T, r, v0, kappa, theta, xi, rho;
-                        n_grid=n_grid, u_max=u_max)
+                        q=q, n_grid=n_grid, u_max=u_max)
         catch
             return 1e6
         end
@@ -145,7 +147,7 @@ function calibrate_heston(strikes, vols, T, S0, r; seed=0, n_starts=12,
     end
     v0, kappa, theta, xi, rho = Float64.(best_x)
     mv = heston_vols(S0, strikes, T, r, v0, kappa, theta, xi, rho;
-                     n_grid=n_grid, u_max=u_max)
+                     q=q, n_grid=n_grid, u_max=u_max)
     info = (
         rmse_vol=sqrt(sum((mv .- vols) .^ 2) / length(vols)),
         max_abs_err_vol=maximum(abs.(mv .- vols)),

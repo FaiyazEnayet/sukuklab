@@ -19,9 +19,11 @@ fft_price(100.0, 100.0, 1.0, 0.05; sigma=0.25)       # agrees with closed form t
 
 | File | Contents |
 |---|---|
-| `black_scholes.jl` | Closed form prices, delta gamma vega theta rho, vanna volga, Newton implied vol with bisection fallback |
+| `black_scholes.jl` | Closed form prices, delta gamma vega theta rho, vanna volga, Newton implied vol with bisection fallback, continuous dividend yield `q` throughout |
+| `american.jl` | Barone Adesi Whaley (1987) approximation for American calls and puts, early exercise premium |
+| `marketdata.jl` | CBOE delayed option chain fetch, parsing, liquidity cleaning, OTM selection, dividend yield from put call parity |
 | `svi.jl` | Raw SVI (Gatheral) slice fits with multi start LBFGS, Durrleman butterfly penalty, calendar spread penalty across expiries |
-| `heston.jl` | Characteristic function (Little trap), Fourier inversion pricing, multi start calibration to a vol smile |
+| `heston.jl` | Characteristic function (Little trap), Fourier inversion pricing, multi start calibration to a vol smile, dividend yield support |
 | `fft.jl` | Carr Madan FFT pricing from any characteristic function, cubic spline to arbitrary strikes |
 
 Plotting (`plot_smile`, `plot_term_structure`) lives in a package extension: install Plots and it just works, skip it and the core never loads it.
@@ -43,12 +45,40 @@ Heston calibration. True params (v0 0.04, kappa 2.0, theta 0.04, xi 0.35, rho -0
 
 FFT agreement. Carr Madan against closed form Black Scholes: max relative error 4.24e-08 across five strikes. FFT against Heston quadrature pricing: max relative error 5.55e-08.
 
-The full suite (`Pkg.test()`) covers put call parity, greeks against finite differences, implied vol roundtrips, SVI recovery with arbitrage checks, Heston calibration recovery, and both FFT agreements. Green.
+The full suite (`Pkg.test()`) covers put call parity, greeks against finite differences, implied vol roundtrips, SVI recovery with arbitrage checks, Heston calibration recovery, both FFT agreements, CBOE fixture parsing and cleaning, BAW against a binomial tree, SVI arbitrage on real data, and Heston convergence on real data. Green.
+
+## Real data
+
+`examples/demo_real.jl` runs the full pipeline on SPY options from CBOE. The feed is free and needs no key, but it is delayed about 15 minutes. The script uses a committed snapshot by default (`data/spy_chain_2026-10-10.json`, 12,894 quotes) so it reproduces offline. Pass `--live` to refetch and save a new snapshot.
+
+All numbers below are from 2026-10-10. SPY spot 778.57. I assumed r = 0.04. Cleaning (drop zero or crossed bids, wide spreads, thin volume and open interest) kept 1,893 of 12,894 quotes. Dividend yields come from put call parity on near ATM pairs: 0.0033 for Oct 16, 0.0000 for Nov 20, 0.0047 for Dec 18. The Nov expiry falls between SPY dividend dates, so zero is what the market says.
+
+SVI surface on the three nearest monthly expiries, OTM quotes only:
+
+| Expiry | T | Quotes | Vol RMSE | Butterfly |
+|---|---|---|---|---|
+| 2026-10-16 | 0.016 | 102 | 0.0078 | clean |
+| 2026-11-20 | 0.112 | 135 | 0.0023 | clean |
+| 2026-12-18 | 0.189 | 139 | 0.0037 | clean |
+
+Calendar check passes across all three.
+
+Heston calibration per expiry (25 strikes each):
+
+| Expiry | Vol RMSE | v0 | kappa | theta | xi | rho |
+|---|---|---|---|---|---|---|
+| 2026-10-16 | 0.081 | 0.057 | 0.10 | 0.005 | 0.69 | -0.99 |
+| 2026-11-20 | 0.010 | 0.025 | 0.10 | 0.380 | 1.50 | -0.24 |
+| 2026-12-18 | 0.020 | 0.027 | 0.10 | 0.005 | 0.39 | -0.99 |
+
+The 6 day expiry defeats Heston. A pure diffusion cannot make short dated skew that steep, and several params sit on their bounds. That is a model limitation, not a data problem. Jumps would be the next step.
+
+American exercise. SPY options are American. I price them with Barone Adesi and Whaley, an analytic approximation, not a tree. It matches a 400 step binomial tree to within 2% on my tests. At the money the early exercise premium is zero for calls and 59 to 256 bps of mid for puts across the three expiries. Small enough that European IVs are a fair summary of the smile, and I report the premium so you can judge the bias yourself.
 
 ## Honest limitations
 
-Everything above is synthetic. I have not fit this to real market data, so I make no claim about how it behaves on noisy quotes. Heston calibration is non convex: the multi start strategy works on clean smiles but real data will want better starting points and vega weighting. American exercise is not supported. The FFT grid assumes strikes well inside the log strike range; it errors loudly otherwise. Dividends are a single continuous yield.
+The synthetic results above are clean by construction. Real data adds noise. CBOE quotes are delayed about 15 minutes, so this is not for live trading. I assume r = 0.04; short rates move and you should set your own. Dividends are a continuous yield backed out of put call parity, which approximates discrete quarterly payments. American exercise uses the Barone Adesi Whaley approximation: it is weakest on deep in the money puts close to expiry. Heston cannot fit very short dated smiles (see the Oct 16 RMSE above); that needs jumps. My liquidity filters (min volume, min open interest, max spread) shape every fit, so different choices give different numbers. The FFT grid assumes strikes well inside the log strike range; it errors loudly otherwise.
 
 ## References
 
-Gatheral (2004) on SVI. Durrleman (2005) on the butterfly condition. Carr and Madan (1999) on FFT pricing. Heston (1993) on stochastic volatility. Albrecher et al. on the Little trap formulation of the characteristic function.
+Gatheral (2004) on SVI. Durrleman (2005) on the butterfly condition. Carr and Madan (1999) on FFT pricing. Heston (1993) on stochastic volatility. Albrecher et al. on the Little trap formulation of the characteristic function. Barone Adesi and Whaley (1987) on the American approximation.

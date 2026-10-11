@@ -13,7 +13,7 @@ calendar arbitrage through total variance increasing in expiry.
 """
 
 const SVI_BOUNDS = [(-0.2, 2.0), (0.0, 3.0), (-0.999, 0.999), (-1.0, 1.0), (0.01, 1.0)]
-const BUTTERFLY_PENALTY = 1e3
+const BUTTERFLY_PENALTY = 1e5
 const CALENDAR_PENALTY = 1e3
 
 """Total variance w(k). p = (a, b, rho, m, sigma)."""
@@ -72,15 +72,10 @@ function check_arbitrage(p; k_grid=range(-2.0, 2.0, length=401))
     )
 end
 
-function _butterfly_penalty(p, k_grid)
-    g = durrleman_g(p, k_grid)
-    return BUTTERFLY_PENALTY * sum(min.(g, 0.0) .^ 2)
-end
-
-function _svi_objective(p, k, w_mkt, k_grid)
+function _svi_objective(p, k, w_mkt, k_grid; bpen=BUTTERFLY_PENALTY)
     w_mod = svi_total_var(p, k)
     rel = (w_mod .- w_mkt) ./ max.(w_mkt, 1e-8)
-    return sum(rel .^ 2) + _butterfly_penalty(p, k_grid)
+    return sum(rel .^ 2) + bpen * sum(min.(durrleman_g(p, k_grid), 0.0) .^ 2)
 end
 
 function _svi_starts(w_atm, n_restarts, seed)
@@ -101,20 +96,37 @@ end
 function _fit_one(k, w_mkt, w_atm, k_grid, n_restarts, seed, cal_ref)
     lower = first.(SVI_BOUNDS)
     upper = last.(SVI_BOUNDS)
-    function objective(p)
-        val = _svi_objective(p, k, w_mkt, k_grid)
+    function objective(p; bpen=BUTTERFLY_PENALTY)
+        val = _svi_objective(p, k, w_mkt, k_grid; bpen=bpen)
         if cal_ref !== nothing
             viol = min.(svi_total_var(p, k_grid) .- cal_ref, 0.0)
             val += CALENDAR_PENALTY * sum(viol .^ 2)
         end
         return val
     end
+    # Box constraints via logit transform; plain LBFGS in unbounded space.
+    # (Fminbox segfaults on this objective under Julia 1.13; the Heston
+    # fitter already uses this same transform for the same reason.)
+    _to_u(x) = log.((x .- lower) ./ (upper .- x))
+    _to_x(y) = lower .+ (upper .- lower) ./ (1 .+ exp.(-y))
     best, best_fun = nothing, Inf
     for x0 in _svi_starts(w_atm, n_restarts, seed)
-        res = optimize(objective, lower, upper, x0, Fminbox(LBFGS()),
+        res = optimize(y -> objective(_to_x(y)), _to_u(x0), LBFGS(),
                        Optim.Options(iterations=2000))
         if Optim.minimum(res) < best_fun
-            best, best_fun = Optim.minimizer(res), Optim.minimum(res)
+            best, best_fun = _to_x(Optim.minimizer(res)), Optim.minimum(res)
+        end
+    end
+    # repair: if the winner still violates butterfly arbitrage (can happen
+    # on steep short-dated smiles), polish it with a hard penalty and keep
+    # the repaired params when they are clean
+    if minimum(durrleman_g(best, k_grid)) < 0
+        res = optimize(y -> objective(_to_x(y); bpen=1e8), _to_u(best), LBFGS(),
+                       Optim.Options(iterations=500))
+        cand = _to_x(Optim.minimizer(res))
+        if minimum(durrleman_g(cand, k_grid)) >= 0
+            best = cand
+            best_fun = objective(best)
         end
     end
     return Tuple(Float64.(best)), best_fun
@@ -160,13 +172,16 @@ end
 
 Fit SVI per expiry with a calendar-spread penalty: slices are fit in
 expiry order and each pays when its total variance dips below the
-previous slice on a shared grid. Returns (params_list, info) with a
-surface-level calendar diagnostic.
+previous slice on a shared grid. `q` may be a scalar or one value per
+expiry. Returns (params_list, info) with a surface-level calendar
+diagnostic.
 """
 function fit_surface(strikes_list, vols_list, expiries, S0, r; q=0.0, n_restarts=4, seed=0)
     expiries = float.(expiries)
     order = sortperm(expiries)
     n = length(expiries)
+    qv = q isa Number ? fill(float(q), n) : float.(q)
+    length(qv) == n || throw(ArgumentError("q must be scalar or match expiries"))
     params_list = Vector{NTuple{5,Float64}}(undef, n)
     slice_infos = Vector{Any}(undef, n)
     k_grid = collect(range(-1.5, 1.5, length=241))
@@ -175,7 +190,7 @@ function fit_surface(strikes_list, vols_list, expiries, S0, r; q=0.0, n_restarts
         strikes = float.(strikes_list[idx])
         vols = float.(vols_list[idx])
         T = expiries[idx]
-        F = S0 * exp((r - q) * T)
+        F = S0 * exp((r - qv[idx]) * T)
         k = log.(strikes ./ F)
         w_mkt = vols .^ 2 .* T
         w_atm = _interp_atm(sortperm(k), k, w_mkt)

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SukukLab playground (static snapshot)</title>
+<style>
+body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+       max-width: 860px; margin: 2em auto; padding: 0 1em; color: #1a1a1a;
+       line-height: 1.55; }
+h1 { font-size: 1.8em; } h2 { margin-top: 2em; border-bottom: 1px solid #ddd;
+       padding-bottom: 0.3em; }
+table { border-collapse: collapse; margin: 1em 0; }
+th, td { border: 1px solid #ccc; padding: 0.35em 0.8em; text-align: left; }
+th { background: #f6f8fa; }
+code { background: #f6f8fa; padding: 0.1em 0.3em; border-radius: 4px; }
+.note { background: #fffbe6; border: 1px solid #e6d96e; border-radius: 8px;
+        padding: 0.8em 1em; }
+img.demo { max-width: 100%; border: 1px solid #ddd; border-radius: 8px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1em; }
+</style>
+</head>
+<body>
+<h1>SukukLab playground</h1>
+<p>A static snapshot of <code>notebook.jl</code>, the interactive Pluto
+notebook in this repo. Every number below was computed by running SukukLab;
+the live version lets you move sliders and watch it all recompute.</p>
+
+<h2>1. Price a sukuk</h2>
+<table><thead><tr><th>Measure</th><th>Value (profit 5.06%, yield 5.06%, 5y, face 1000)</th></tr></thead><tbody>
+<tr><td>Clean price</td><td>999.9</td></tr>
+<tr><td>Cash flows</td><td>10</td></tr>
+<tr><td>Yield to maturity</td><td>5.06%</td></tr>
+<tr><td>Macaulay duration</td><td>4.4817 years</td></tr>
+<tr><td>Modified duration</td><td>4.3711</td></tr>
+<tr><td>Convexity</td><td>22.5815</td></tr>
+<tr><td>DV01</td><td>0.4371</td></tr>
+</tbody></table>
+<p><img class="demo" src="demo.gif" alt="Animated sweep of the UAE T-Sukuk price as the market yield moves from 2% to 9%"></p>
+
+<h2>2. Cash-flow structures</h2>
+<p>Three year, 5% annual, semi-annual. Ijara and wakala pay periodic
+distributions with principal at maturity; murabaha pays the deferred sale
+price in equal installments.</p>
+<div class="grid">
+<div><h3>Ijara (bullet)</h3><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody>
+<tr><td>2026-07-15</td><td>25.0</td></tr>
+<tr><td>2027-01-15</td><td>25.0</td></tr>
+<tr><td>2027-07-15</td><td>25.0</td></tr>
+<tr><td>2028-01-15</td><td>25.0</td></tr>
+<tr><td>2028-07-15</td><td>25.0</td></tr>
+<tr><td>2029-01-15</td><td>1025.0</td></tr>
+<tr><td>Total</td><td>1150.0</td></tr>
+</tbody></table></div>
+<div><h3>Murabaha (installments)</h3><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody>
+<tr><td>2026-07-15</td><td>191.69</td></tr>
+<tr><td>2027-01-15</td><td>191.69</td></tr>
+<tr><td>2027-07-15</td><td>191.69</td></tr>
+<tr><td>2028-01-15</td><td>191.69</td></tr>
+<tr><td>2028-07-15</td><td>191.69</td></tr>
+<tr><td>2029-01-15</td><td>191.69</td></tr>
+<tr><td>Total</td><td>1150.14</td></tr>
+</tbody></table></div>
+<div><h3>Wakala (bullet)</h3><table><thead><tr><th>Date</th><th>Amount</th></tr></thead><tbody>
+<tr><td>2026-07-15</td><td>25.0</td></tr>
+<tr><td>2027-01-15</td><td>25.0</td></tr>
+<tr><td>2027-07-15</td><td>25.0</td></tr>
+<tr><td>2028-01-15</td><td>25.0</td></tr>
+<tr><td>2028-07-15</td><td>25.0</td></tr>
+<tr><td>2029-01-15</td><td>1025.0</td></tr>
+<tr><td>Total</td><td>1150.0</td></tr>
+</tbody></table></div>
+</div>
+
+<h2>3. Bootstrapped profit-rate curve</h2>
+<p>From the real IILM short-term sukuk auction clearing rates, January 2026
+(1m 3.81%, 3m 3.84%, 6m 3.82%, 12m 3.45%), read from
+<code>data/iilm_2026-01.json</code> and treated as simple annualized discount
+rates.</p>
+<table><thead><tr><th>Pillar</th><th>Zero rate</th></tr></thead><tbody>
+<tr><td>0.0849y</td><td>3.8038%</td></tr>
+<tr><td>0.2466y</td><td>3.8219%</td></tr>
+<tr><td>0.4959y</td><td>3.7843%</td></tr>
+<tr><td>1.0y</td><td>3.3918%</td></tr>
+</tbody></table>
+<p>6m/12m forward rate: <strong>3.0026%</strong>.</p>
+<svg width="520" height="320" style="background:white;border:1px solid #ddd;border-radius:8px" xmlns="http://www.w3.org/2000/svg">
+  <text x="56" y="15" font-size="13" fill="#333">Zero curve, continuously compounded %</text>
+  <line x1="56" y1="280.0" x2="504" y2="280.0" stroke="#999"/>
+  <line x1="56" y1="20" x2="56" y2="280.0" stroke="#999"/>
+  <polyline points="68.8,58.1 74.0,58.1 79.3,58.1 84.5,58.1 89.8,58.1 95.0,57.8 100.2,57.1 105.5,56.5 110.7,55.9 115.9,55.2 121.2,54.6 126.4,53.9 131.7,53.3 136.9,52.7 142.1,52.0 147.4,51.4 152.6,50.7 157.9,50.1 163.1,50.0 168.3,50.9 173.6,51.7 178.8,52.6 184.1,53.5 189.3,54.3 194.5,55.2 199.8,56.0 205.0,56.9 210.2,57.8 215.5,58.6 220.7,59.5 226.0,60.4 231.2,61.2 236.4,62.1 241.7,63.0 246.9,63.8 252.2,64.7 257.4,65.6 262.6,66.4 267.9,67.5 273.1,71.9 278.4,76.4 283.6,80.8 288.8,85.3 294.1,89.7 299.3,94.2 304.5,98.6 309.8,103.1 315.0,107.5 320.3,112.0 325.5,116.4 330.7,120.9 336.0,125.4 341.2,129.8 346.5,134.3 351.7,138.7 356.9,143.2 362.2,147.6 367.4,152.1 372.7,156.5 377.9,161.0 383.1,165.4 388.4,169.9 393.6,174.3 398.8,178.8 404.1,183.2 409.3,187.7 414.6,192.1 419.8,196.6 425.0,201.0 430.3,205.5 435.5,209.9 440.8,214.4 446.0,218.8 451.2,223.3 456.5,227.7 461.7,232.2 467.0,236.6 472.2,241.1 477.4,245.5 482.7,250.0" fill="none" stroke="#1f6feb" stroke-width="2"/>
+  <circle cx="92.2" cy="58.1" r="4" fill="#1f6feb"/>
+<circle cx="161.2" cy="49.7" r="4" fill="#1f6feb"/>
+<circle cx="267.6" cy="67.2" r="4" fill="#1f6feb"/>
+<circle cx="482.7" cy="250.0" r="4" fill="#1f6feb"/>
+  <text x="56" y="310" font-size="11" fill="#666">0y</text>
+  <text x="476.66666666666663" y="310" font-size="11" fill="#666">1y</text>
+  <text x="6" y="24.0" font-size="11" fill="#666">3.89%</text>
+  <text x="6" y="284.0" font-size="11" fill="#666">3.33%</text>
+</svg>
+
+<h2>Run it live</h2>
+<p>You need <a href="https://julialang.org">Julia</a> and
+<a href="https://plutojl.org">Pluto.jl</a>. From the repo root:</p>
+<pre><code>using Pluto
+Pluto.run(notebook="notebook.jl")</code></pre>
+
+<div class="note"><p><strong>Note.</strong> This page is a static snapshot.
+The notebook is interactive: sliders for profit rate, market yield, maturity
+and face value, a structure picker, and editable auction rates. The snapshot
+shows the notebook's default values.</p></div>
+</body>
+</html>

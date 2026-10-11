@@ -27,8 +27,8 @@ function main()
         chain_to_json(chain, path)
         println("saved fixture: $path")
     else
-        names = filter(f -> startswith(f, "spy_chain_") && endswith(f, ".json"),
-                         readdir(datadir))
+        names = filter(f -> startswith(f, "spy_chain_"),
+                       readdir(datadir))
         isempty(names) && error("no fixture in data/; run once with --live")
         path = joinpath(datadir, last(sort(names)))
         println("using fixture: $path (offline)")

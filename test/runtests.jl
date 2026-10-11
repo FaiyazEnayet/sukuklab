@@ -137,11 +137,11 @@ using Dates
 
     @testset "marketdata_fixture" begin
         # Committed CBOE snapshot loads offline; no network in tests.
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
         chain = chain_from_json(path)
         @test chain.ticker == "SPY"
         @test chain.spot ≈ 778.57
-        @test length(chain.quotes) == 12894
+        @test length(chain.quotes) == 1432  # 3 demo expiries
         q0 = chain.quotes[1]
         @test q0.expiry isa Date && q0.strike > 0.0
         @test q0.bid >= 0.0 && q0.ask >= q0.bid
@@ -226,7 +226,7 @@ using Dates
 
     @testset "svi_real_fixture" begin
         # SVI surface on the real SPY snapshot is arbitrage-free.
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
         chain = chain_from_json(path)
         clean = clean_chain(chain.quotes)
         S0, r = chain.spot, 0.04
@@ -254,7 +254,7 @@ using Dates
 
     @testset "heston_real_fixture" begin
         # Heston converges on the real Nov-2026 smile; RMSE sane (< 5 vol pts).
-        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10.json")
+        path = joinpath(@__DIR__, "..", "data", "spy_chain_2026-10-10")
         chain = chain_from_json(path)
         clean = clean_chain(chain.quotes)
         S0, r = chain.spot, 0.04

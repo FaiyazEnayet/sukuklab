@@ -174,19 +174,33 @@ function chain_to_json(chain, path::AbstractString)
     return path
 end
 
-"""Load a chain previously saved with `chain_to_json`."""
+"""Load a chain previously saved with `chain_to_json`.
+
+Accepts a single JSON file or a directory of per-expiry JSON files
+(the committed snapshot is split this way to keep each file small).
+Directory parts are merged in sorted filename order."""
 function chain_from_json(path::AbstractString)
-    obj = JSON.parsefile(path)
-    ts = isempty(obj["timestamp"]) ? nothing :
-        DateTime(obj["timestamp"], "yyyy-mm-dd HH:MM:SS")
-    quotes = [(
-        expiry=Date(q["expiry"], "yyyy-mm-dd"),
-        strike=Float64(q["strike"]),
-        is_call=Bool(q["is_call"]),
-        bid=Float64(q["bid"]), ask=Float64(q["ask"]),
-        volume=Float64(q["volume"]), open_interest=Float64(q["open_interest"]),
-        cboe_iv=Float64(q["cboe_iv"]), theo=Float64(q["theo"]),
-    ) for q in obj["quotes"]]
-    return (ticker=obj["ticker"], timestamp=ts, spot=Float64(obj["spot"]),
-            quotes=quotes)
+    files = isdir(path) ?
+        [joinpath(path, f) for f in sort(filter(f -> endswith(f, ".json"),
+                                                readdir(path)))] : [path]
+    isempty(files) && error("no JSON fixture found at $path")
+    ticker, ts, spot, quotes = "", nothing, 0.0, []
+    for (i, f) in enumerate(files)
+        obj = JSON.parsefile(f)
+        tsi = isempty(obj["timestamp"]) ? nothing :
+            DateTime(obj["timestamp"], "yyyy-mm-dd HH:MM:SS")
+        qs = [(
+            expiry=Date(q["expiry"], "yyyy-mm-dd"),
+            strike=Float64(q["strike"]),
+            is_call=Bool(q["is_call"]),
+            bid=Float64(q["bid"]), ask=Float64(q["ask"]),
+            volume=Float64(q["volume"]), open_interest=Float64(q["open_interest"]),
+            cboe_iv=Float64(q["cboe_iv"]), theo=Float64(q["theo"]),
+        ) for q in obj["quotes"]]
+        if i == 1
+            ticker, ts, spot = obj["ticker"], tsi, Float64(obj["spot"])
+        end
+        append!(quotes, qs)
+    end
+    return (ticker=ticker, timestamp=ts, spot=spot, quotes=quotes)
 end

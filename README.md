@@ -1,4 +1,4 @@
-# Volkit
+# sukuklab
 
 Fixed-income analytics for sukuk, in Julia. I wanted one clean library for the instruments I actually care about: pricing a fixed-profit-rate sukuk from its cash flows, building a profit-rate curve from published auction results, and measuring duration and convexity the way a portfolio manager would. No derivatives anywhere in this repo. Just cash flows, curves, and risk.
 

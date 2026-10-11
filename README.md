@@ -79,10 +79,6 @@ American exercise. SPY options are American. I price them with Barone Adesi and 
 
 The synthetic results above are clean by construction. Real data adds noise. CBOE quotes are delayed about 15 minutes, so this is not for live trading. I assume r = 0.04; short rates move and you should set your own. Dividends are a continuous yield backed out of put call parity, which approximates discrete quarterly payments. American exercise uses the Barone Adesi Whaley approximation: it is weakest on deep in the money puts close to expiry. Heston cannot fit very short dated smiles (see the Oct 16 RMSE above); that needs jumps. My liquidity filters (min volume, min open interest, max spread) shape every fit, so different choices give different numbers. The FFT grid assumes strikes well inside the log strike range; it errors loudly otherwise.
 
-## A note on Sharia compliance
-
-Most scholars consider trading conventional options haram because of gharar. This package does not trade anything. It is a volatility toolkit. The same SVI, Heston, and FFT machinery is used to price sukuk with embedded options and to manage risk in Islamic banks. The math is a tool. Whether your use is halal depends on the contracts you touch, not the formulas. I am not a scholar. If you need a ruling, ask one.
-
 ## References
 
 Gatheral (2004) on SVI. Durrleman (2005) on the butterfly condition. Carr and Madan (1999) on FFT pricing. Heston (1993) on stochastic volatility. Albrecher et al. on the Little trap formulation of the characteristic function. Barone Adesi and Whaley (1987) on the American approximation.

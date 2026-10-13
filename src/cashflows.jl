@@ -3,7 +3,7 @@ Cash-flow modeling for fixed-profit-rate sukuk.
 
 A sukuk certificate represents ownership in an underlying arrangement
 and pays periodic profit distributions plus principal at maturity.
-Two common mechanics are modeled here, described factually:
+Two common mechanics are modeled here:
 
 - Ijara (lease-based): the SPV owns an asset and leases it to the
   obligor. Certificate holders receive periodic rental distributions

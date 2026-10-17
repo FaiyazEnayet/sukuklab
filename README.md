@@ -33,6 +33,10 @@ Dated cash flows are discounted under the selected rate convention. Price-yield 
 | Same default at 5% nominal yield | Price 999.90; modified duration 4.3711 years |
 | Rate convention | Nominal semiannual yield; Actual/365 date fractions in this view |
 
+## Updating this project
+
+Dashboard source language: **Julia**. Generator: `examples/make_dashboard.jl`. To keep the interactive page, figures, data animation, and README consistent, follow [the coding-agent update guide](AGENT-DASHBOARD-GUIDE.md). The local interactive output is `docs/dashboard.html`.
+
 ## Run locally
 
 

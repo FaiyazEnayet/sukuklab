@@ -1,17 +1,18 @@
-<p align="center"><img src="docs/readme-banner.svg" alt="SukukLab: Cash-flow valuation and profit-rate risk in Julia" width="1200"></p>
+<p align="center"><img src="docs/readme-banner.svg?v=type-20261017b" alt="SukukLab: Cash-flow valuation and profit-rate risk in Julia" width="1200"></p>
 
 [![Tests](https://github.com/FaiyazEnayet/sukuklab/actions/workflows/ci.yml/badge.svg)](https://github.com/FaiyazEnayet/sukuklab/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-007EC6)](LICENSE) ![Julia 1.10+](https://img.shields.io/badge/Julia-1.10%2B-9558B2) ![Built with Julia + Pluto](https://img.shields.io/badge/built%20with-Julia%20%2B%20Pluto-555555) [![Interactive demo](https://img.shields.io/badge/demo-interactive-4C9D39)](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html)
 
-<p align="center"><a href="https://faiyazenayet.github.io/sukuklab/docs/dashboard.html"><b>Open interactive demo</b></a> · <a href="docs/dashboard.html">HTML file</a> · <a href="#method">Method</a> · <a href="#run-locally">Run locally</a> · <a href="#limitations">Limitations</a></p>
+<p align="center"><a href="https://faiyazenayet.github.io/sukuklab/docs/dashboard.html"><b>Open interactive demo</b></a> · <a href="#method">Method</a> · <a href="#run-locally">Run locally</a></p>
 
 # SukukLab
 
 SukukLab makes the relationship between contract cash flows, yield and interest-rate sensitivity explicit. It provides pricing, yield solving, duration, convexity and curve tools with inspectable conventions.
 
-**Julia · fixed-income mathematics · reproducible schedules**
 
-[![SukukLab demo](docs/demo.gif?v=data-20261017)](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html)
+[![SukukLab demo](docs/demo.gif?v=showcase-20261017b)](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html)
 
+
+Valuation is most useful when the assumptions can be traced from contract cash flows to discount factors. Compare maturity, principal repayment and profit timing before interpreting a difference in price or duration. The January 2026 IILM observations provide a dated market reference; the illustrative structures support financial comparison without establishing legal or Sharia compliance.
 
 ## Explore
 

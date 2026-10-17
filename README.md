@@ -35,7 +35,7 @@ Dated cash flows are discounted under the selected rate convention. Price-yield 
 
 ## Updating this project
 
-Dashboard source language: **Julia**. Generator: `examples/make_dashboard.jl`. To keep the interactive page, figures, data animation, and README consistent, follow [the coding-agent update guide](AGENT-DASHBOARD-GUIDE.md). The local interactive output is `docs/dashboard.html`.
+Dashboard source language: **Julia**. Generator: `examples/make_dashboard.jl`. The local interactive output is `docs/dashboard.html`.
 
 ## Run locally
 

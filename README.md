@@ -10,7 +10,7 @@ SukukLab makes the relationship between contract cash flows, yield and interest-
 
 **Julia · fixed-income mathematics · reproducible schedules**
 
-[![SukukLab demo](docs/demo.gif)](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html)
+[![SukukLab demo](docs/demo.gif?v=data-20261017)](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html)
 
 
 ## Explore

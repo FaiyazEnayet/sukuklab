@@ -119,6 +119,44 @@ using Dates
         @test_throws ArgumentError forward_rate(curve, 1.0, 0.5)
     end
 
+    @testset "bootstrap_reprices_between_pillars" begin
+        # SU1 regression: a coupon falling between the previous last pillar
+        # and the new pillar must not be frozen on the old curve. Nonflat
+        # fixture: discount bill at 6m, then a 1.5y coupon bond with an
+        # intermediate coupon at 1y (between the 0.5y and 1.5y pillars).
+        anchor = Date(2026, 1, 1)
+        t6m = yearfrac(anchor, anchor + Month(6), :actual_365)
+        t1y = yearfrac(anchor, anchor + Month(12), :actual_365)
+        t18m = yearfrac(anchor, anchor + Month(18), :actual_365)
+        # True curve: 3% at 6m, 5% at 18m (nonflat).
+        disc6m = exp(-0.03 * t6m)
+        bill = ([CashFlow(anchor + Month(6), 100.0)], 100.0 * disc6m)
+        # 1.5y bond, 4% annual coupons semiannual: coupons at 1y and 1.5y.
+        cpn = 2.0
+        cfs = [CashFlow(anchor + Month(12), cpn),
+               CashFlow(anchor + Month(18), 100.0 + cpn)]
+        # Price on the true nonflat curve with linear zero interpolation.
+        r_at(t) = t <= t6m ? 0.03 : 0.03 + (0.05 - 0.03) * (t - t6m) / (t18m - t6m)
+        true_price = sum(cf.amount *
+                         exp(-r_at(yearfrac(anchor, cf.date, :actual_365)) *
+                             yearfrac(anchor, cf.date, :actual_365)) for cf in cfs)
+        curve = bootstrap([bill, (cfs, true_price)], anchor)
+        @test length(curve.pillars) == 2
+        # Every input reprices to 1e-8 per 100 face.
+        for (ics, price) in [bill, (cfs, true_price)]
+            rp = sum(cf.amount * discount(curve, cf.date) for cf in ics)
+            @test isapprox(rp, price; atol=1e-8)
+        end
+        # Independent check: the 1.5y zero must satisfy the scalar equation
+        # price = cpn*exp(-r(1y)*1y) + 102*exp(-z*1.5y) with r(1y) linearly
+        # interpolated between the solved pillars.
+        z6m = curve.zeros[1]
+        z18m = curve.zeros[2]
+        r1y = z6m + (z18m - z6m) * (t1y - t6m) / (t18m - t6m)
+        implied = cpn * exp(-r1y * t1y) + 102.0 * exp(-z18m * t18m)
+        @test isapprox(implied, true_price; atol=1e-8)
+    end
+
     @testset "bootstrap_synthetic" begin
         # Flat 4% continuous curve: build par bonds, bootstrap must recover it.
         anchor = Date(2026, 1, 1)

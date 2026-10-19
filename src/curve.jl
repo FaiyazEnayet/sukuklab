@@ -103,6 +103,13 @@ order of final maturity. The first instrument must be a discount
 (single cash flow) instrument. Each later instrument contributes one
 new pillar at its final maturity, solved so the curve reprices the
 instrument exactly.
+
+For coupon instruments the new pillar is found by root-solving the
+full instrument present value on the candidate curve that already
+includes the new pillar. This matters because linear zero-rate
+interpolation means the new pillar changes discount factors for
+intermediate dates between the previous last pillar and the new one;
+freezing those coupons on the old curve would leave a repricing error.
 """
 function bootstrap(instruments::Vector{Tuple{Vector{CashFlow},Float64}},
                    anchor::Date)
@@ -112,7 +119,6 @@ function bootstrap(instruments::Vector{Tuple{Vector{CashFlow},Float64}},
         throw(ArgumentError("first instrument must be a discount instrument"))
     pillars = Float64[]
     zeros = Float64[]
-    curve = ZeroCurve(anchor, pillars, zeros)
     for (cfs, price) in ordered
         price <= 0 && throw(ArgumentError("price must be positive"))
         T = yearfrac(anchor, cfs[end].date, :actual_365)
@@ -122,16 +128,52 @@ function bootstrap(instruments::Vector{Tuple{Vector{CashFlow},Float64}},
             0 < d <= 1 || throw(ArgumentError("discount price out of range"))
             z = -log(d) / T
         else
-            pv_known = sum(cf.amount *
-                           discount(curve, yearfrac(anchor, cf.date, :actual_365))
-                           for cf in cfs[1:(end - 1)])
-            d_last = (price - pv_known) / cfs[end].amount
-            0 < d_last <= 1 ||
-                throw(ArgumentError("implied discount factor out of range"))
-            z = -log(d_last) / T
+            times = [yearfrac(anchor, cf.date, :actual_365) for cf in cfs]
+            amounts = [cf.amount for cf in cfs]
+            function pv_at(z_new)
+                trial = ZeroCurve(anchor, [pillars; T], [zeros; z_new])
+                s = 0.0
+                for (a, t) in zip(amounts, times)
+                    s += a * discount(trial, t)
+                end
+                return s
+            end
+            z = _bisect_zero(z -> pv_at(z) - price)
         end
         push!(pillars, T)
         push!(zeros, z)
     end
     return ZeroCurve(anchor, pillars, zeros)
+end
+
+"""
+    _bisect_zero(f; lo, hi, tol, maxiter)
+
+Bisection root finder for a continuous strictly decreasing `f`.
+The bracket expands automatically until `f(lo) > 0 > f(hi)`.
+"""
+function _bisect_zero(f; lo=-1.0, hi=5.0, tol=1e-12, maxiter=200)
+    flo, fhi = f(lo), f(hi)
+    for _ in 1:50
+        (flo > 0 && fhi < 0) && break
+        if flo <= 0
+            lo -= (hi - lo)
+        else
+            hi += (hi - lo)
+        end
+        flo, fhi = f(lo), f(hi)
+    end
+    (flo > 0 && fhi < 0) ||
+        throw(ArgumentError("could not bracket root for curve bootstrap"))
+    for _ in 1:maxiter
+        mid = (lo + hi) / 2
+        fmid = f(mid)
+        (abs(fmid) < tol || (hi - lo) < tol) && return mid
+        if fmid > 0
+            lo = mid
+        else
+            hi = mid
+        end
+    end
+    return (lo + hi) / 2
 end

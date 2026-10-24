@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <a href="https://faiyazenayet.github.io/sukuklab/docs/dashboard.html"><img src="https://img.shields.io/badge/Open-Dashboard-765b20?style=for-the-badge&labelColor=000000" alt="Open Dashboard"></a>
-  <a href="#live-interactive-demo"><img src="https://img.shields.io/badge/Explore-Notebook-15365e?style=for-the-badge&labelColor=000000" alt="Explore Notebook"></a>
-  <a href="#quick-start"><img src="https://img.shields.io/badge/Run-Locally-516278?style=for-the-badge&labelColor=000000" alt="Run Locally"></a>
+  <a href="https://faiyazenayet.github.io/sukuklab/docs/dashboard.html"><img src="https://img.shields.io/badge/Open-Dashboard-765b20?style=for-the-badge&labelColor=f4edda" alt="Open Dashboard"></a>
+  <a href="#live-interactive-demo"><img src="https://img.shields.io/badge/Explore-Notebook-15365e?style=for-the-badge&labelColor=f4edda" alt="Explore Notebook"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/Run-Locally-516278?style=for-the-badge&labelColor=f4edda" alt="Run Locally"></a>
 </p>
 
 Fixed-income analytics for sukuk, in Julia. I built one clean library for the instruments I actually work with: pricing a fixed-profit-rate sukuk from its cash flows, building a profit-rate curve from published auction results, and measuring duration and convexity the way a portfolio manager would. Cash flows, curves, and risk. Nothing else.

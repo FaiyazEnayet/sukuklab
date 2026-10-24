@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+### Docs
+- Centered the README header with the repo banner: uniform dark badge labels and three action buttons (Open Dashboard, Explore Notebook, Run Locally) with a black label side so they stand out on the page.
+
 ## v1.1.0
 
 ### Fixed

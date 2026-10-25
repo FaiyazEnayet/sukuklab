@@ -70,7 +70,7 @@ Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk
 
 Every number here comes from `examples/demo.jl`, run on 2026-10-11.
 
-I bootstrapped a short end zero curve from real published data: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The curve recovers every auction point exactly, as a bootstrap should:
+Real published data from a bootstrapped a short end zero curve: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The curve recovers every auction point exactly, as a bootstrap should:
 
 | Pillar | Zero rate |
 |---|---|

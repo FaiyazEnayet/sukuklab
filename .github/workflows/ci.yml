@@ -14,3 +14,9 @@ jobs:
           version: "1"
       - name: Run tests
         run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+      - name: Check generated results are fresh
+        run: |
+          julia --project=. examples/make_results.jl
+          git diff --exit-code -- examples/results.json test/fixtures/valuation_parity.json
+      - name: Python parity check
+        run: python3 test/check_parity.py

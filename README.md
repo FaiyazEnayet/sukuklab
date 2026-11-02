@@ -57,7 +57,7 @@ flowchart LR
 
 | File | What it does |
 |---|---|
-| `src/sukuklab.jl` | Package entry point. Re-exports everything. |
+| `src/SukukLab.jl` | Package entry point. Re-exports everything. |
 | `src/sukuk.jl` | Closed-form pricing and yield to maturity for plain fixed-profit-rate sukuk. |
 | `src/cashflows.jl` | Distribution schedules for ijara, murabaha and wakala structures, bullet and installment shapes, 30/360 and Actual/365 day counts, accrued profit. |
 | `src/curve.jl` | Zero profit-rate curves, discount factors, forward rates, par rates, bootstrapping from market instruments. |
@@ -68,7 +68,7 @@ Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk
 
 ## Measured results
 
-Every number here comes from `examples/demo.jl`, run on 2026-10-11.
+Every number here is computed by the package from the archived inputs and recorded in the canonical results file `examples/results.json`; the test suite recomputes them and checks the quoted values against it.
 
 Real published data from a bootstrapped a short end zero curve: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The curve recovers every auction point exactly, as a bootstrap should:
 
@@ -85,7 +85,20 @@ I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5
 
 The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
 
-The full suite is 83 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting.
+The full suite is 149 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
+
+## Reproducing the results
+
+From a clean checkout, with Julia 1.10 or newer:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
+julia --project=. examples/demo.jl
+julia --project=. examples/make_results.jl
+python3 test/check_parity.py
+```
+
+The demo recomputes every number in Measured results from the archived inputs. `make_results.jl` regenerates the canonical results file (`examples/results.json`) and the shared valuation fixtures (`test/fixtures/valuation_parity.json`) from the package alone; CI fails if the checked-in files differ from a fresh regeneration. `check_parity.py` is a standard-library-only Python implementation of the same documented pricing formulas, and verifies that Julia and Python valuations agree to within 1e-8 per 1,000 face on the shared fixtures.
 
 ## Real data
 

@@ -59,7 +59,7 @@ begin
 		nb_price > nb_face ? "premium: the market yield is below the profit rate" :
 		"discount: the market yield is above the profit rate"
 	md"""
-	**Clean price: $(round(nb_price; digits=2))** on $(round(Int, nb_face)) face ($(nb_verdict)).
+	**Full price: $(round(nb_price; digits=2))** on $(round(Int, nb_face)) face ($(nb_verdict)). Settlement is the issue date, so no profit has accrued yet and the clean price equals the full price.
 
 	| Measure | Value |
 	|---|---|

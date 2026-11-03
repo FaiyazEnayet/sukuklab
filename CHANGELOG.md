@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- Contract-grade dated cash flows in `src/cashflows.jl`: schedules are modeled as explicit `DistributionPeriod`s (unadjusted contractual start and finish, payment date, regular/stub flag) generated from the anchor (`distribution_periods`), a `DayCount` enumeration (`Thirty360`, `Actual365`) alongside the existing symbols, a weekend business-day adjustment declared on the terms (`adjustment=:following`, `:modified_following` or `:preceding`; default `:unadjusted`), and an explicit payment-rounding policy on `payment_schedule` (default full precision; `rounding=:cent` rounds each payment to cents with the installment residual absorbed by the final payment).
+- `price_decomposition` and `ytm_from_clean_price` in `src/analytics.jl`: a settlement price as three distinct quantities (full price, accrued profit, clean price) that reconcile exactly, and yield recovery from a quoted clean price.
+
+### Fixed
+- Schedule generation no longer steps month by month from an already-clamped date. A monthly schedule issued on the 30th previously paid on the 28th from March onward, and a semi-annual issued 2026-08-31 never landed on leap day 2028-02-29; dates are now computed from the issue anchor in one step, end-of-month anchors stay on month ends, and the spurious short final periods the drift created are gone.
+- A final stub period previously paid a full regular distribution. It now pays its actual 30/360 fraction, and accrued profit inside a stub accrues that stub distribution.
+- The 30/360 day count now follows the bond-basis rules: a second date on the 31st is kept when the first date is below the 30th (2026-01-29 to 2026-01-31 is 2/360, was 1/360), and February end-of-month dates count as the 30th (2026-02-28 to 2026-08-28 is 178/360, was 180/360; 2024-02-29 to 2024-08-29 is 179/360).
+- The closed-form pricer rejected nothing: a maturity that is not a whole number of periods was silently rounded to the nearest period count. `sukuk_price` (and `sukuk_ytm` through it) now raises an error for non-whole-period maturity/frequency pairs and points at the dated schedule.
+- Price presentation: the settlement present value was labeled a clean price in the README, the demo and the notebook even though it includes accrued profit. It is now presented as the full price, with accrued profit and the clean price stated separately (UAE retail T-Sukuk at settlement 2026-10-10: full 1000, accrued 1.41, clean 998.59 on 1000 face; no other quoted number changed).
+
+### Added
 - Published-terms reconstruction of the IILM auction record (`data/iilm_2026-01.json`): each of the four January 2026 series now carries its series number, ISIN, amount, clearing profit rate, actual issue date (2026-01-15) and published maturity date, the verbatim press-release quote, and its sources, with the auction date (2026-01-13) stored separately as the observation time.
 - `src/marketdata.jl`: a validated loader (`load_auction_record`) for the auction record, with strict errors on missing or blank issue/maturity dates, unknown rate conventions, mixed issuers or currencies, and duplicate identifiers, plus model pricing under the record's named convention (simple profit rate, Actual/365) and per-series pricing residuals (`pricing_residuals`).
 - `examples/make_iilm_residuals.jl`: regenerates the pricing-residual report (`examples/iilm_residuals.json` and `.csv`) with the source data file's SHA-256; all four residuals are 0.0 per 100 face.

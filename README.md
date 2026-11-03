@@ -60,10 +60,10 @@ flowchart LR
 |---|---|
 | `src/SukukLab.jl` | Package entry point. Re-exports everything. |
 | `src/sukuk.jl` | Closed-form pricing and yield to maturity for plain fixed-profit-rate sukuk. |
-| `src/cashflows.jl` | Distribution schedules for ijara, murabaha and wakala structures, bullet and installment shapes, 30/360 and Actual/365 day counts, accrued profit. |
+| `src/cashflows.jl` | Distribution schedules for ijara, murabaha and wakala structures, bullet and installment shapes, generated from the contractual anchor with explicit regular and stub periods, 30/360 and Actual/365 day counts, accrued profit. |
 | `src/curve.jl` | Zero profit-rate curves, discount factors, forward rates, par rates, bootstrapping from market instruments. |
 | `src/marketdata.jl` | Validated loader for published auction records: series and ISIN identifiers, actual issue and maturity dates, provenance and quotes, and model pricing under the record's named rate convention. |
-| `src/analytics.jl` | Yield to maturity, current yield, Macaulay and modified duration, convexity, DV01, parallel shift repricing. |
+| `src/analytics.jl` | Yield to maturity, full/accrued/clean price decomposition, current yield, Macaulay and modified duration, convexity, DV01, parallel shift repricing. |
 | `src/portfolio.jl` | Market-value-weighted yield, duration and convexity across holdings. |
 
 Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk pays lease-based periodic distributions with principal at maturity. A murabaha sukuk reflects a deferred sale: cost plus agreed profit, paid as a bullet or in installments. A wakala sukuk pays distributions from an agency-managed pool. The library models the cash-flow shapes that follow from each structure. Nothing more.
@@ -83,11 +83,11 @@ Real published data from a bootstrapped short end zero curve: the IILM short-ter
 
 The 6m to 12m forward rate is 2.9987%. The published 12m clearing rate sat below the 6m rate, and the curve keeps that shape.
 
-I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued 2026-10-10 at a clean price of 1000 on 1000 face: YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices it to 957.66. Accrued profit at settlement: 1.41.
+I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued at settlement 2026-10-10, ten days after the 2026-09-30 distribution: the full price is 1000 on 1000 face, of which 1.41 is profit accrued since that distribution, so the clean price is 998.59. YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices the full price to 957.66.
 
 The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
 
-The full suite is 185 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, the published-terms IILM reconstruction fixture with its loader validation, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
+The full suite is 251 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, anchor-generated month-end and leap-day schedules with explicit stub periods, the bond-basis 30/360 reference values, full/accrued/clean price decomposition and clean-price yield roundtrips, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, the published-terms IILM reconstruction fixture with its loader validation, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
 
 ## Reproducing the results
 

@@ -51,9 +51,11 @@ println("  modified duration: ", round(modified_duration(cfs, y, settle); digits
 println("  convexity: ", round(convexity(cfs, y, settle); digits=4))
 println("  DV01 per 1000 face: ", round(dv01(cfs, y, settle); digits=4))
 p_up = price_under_shift(cfs, y, 100, settle)
-println("  price after +100bp parallel shift: ", round(p_up; digits=2))
-println("  accrued profit at settlement: ",
-        round(accrued_profit(uae, settle); digits=2))
+println("  full price after +100bp parallel shift: ", round(p_up; digits=2))
+dec = price_decomposition(uae, y, settle)
+println("  full price at settlement: ", round(dec.full_price; digits=2))
+println("  accrued profit at settlement: ", round(dec.accrued; digits=2))
+println("  clean price at settlement: ", round(dec.clean_price; digits=2))
 
 println("\n== 3. Illustrative three-sukuk portfolio (synthetic) ==")
 mk(terms, price, qty, sdate) = begin

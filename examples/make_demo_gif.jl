@@ -249,8 +249,8 @@ function main()
     X(y) = round(Int, px1 + (y - ylo) / (yhi - ylo) * (px2 - px1))
     Y(p) = round(Int, py2 - (p - plo) / (phi - plo) * (py2 - py1))
 
-    canvas = GifCanvas(W, H, [(0xff, 0xff, 0xff), (0x1a, 0x1a, 0x1a),
-                              (0x1f, 0x6f, 0xeb), (0xd6, 0x27, 0x28)])
+    canvas = GifCanvas(W, H, [(0xf7, 0xf3, 0xe9), (0x12, 0x2a, 0x42),
+                              (0xb7, 0x84, 0x37), (0x0b, 0x48, 0x64)])
     frames = Matrix{UInt8}[]
     nframes = 40
     for i in 1:nframes
@@ -280,8 +280,8 @@ function main()
         disc!(f, X(yc), Y(pc), 6, 0x03)
         disc!(f, X(yc), Y(pc), 3, 0x00)
         # readout
-        text!(f, px1, 8, "YIELD $(round(100yc; digits=2))%  PRICE $(round(pc; digits=2))", 0x01)
-        text!(f, px1, py2 + 30, "UAE T-SUKUK 5Y 5.06 PCT - MARKET YIELD SWEEP", 0x01)
+        text!(f, px1, 8, "YIELD $(round(100yc; digits=2))%  FULL PRICE $(round(pc; digits=2))", 0x01)
+        text!(f, px1, py2 + 30, "UAE T-SUKUK - SETTLEMENT 2026-10-10", 0x01)
         push!(frames, f)
     end
 

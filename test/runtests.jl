@@ -215,6 +215,197 @@ using Dates
         end
     end
 
+    @testset "curve_pillar_validation" begin
+        anchor = Date(2026, 1, 1)
+        # Pillars are documented as strictly increasing: a repeated
+        # maturity must be rejected (issorted alone accepts it, and the
+        # interpolation then divides by the zero pillar gap).
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, 0.5],
+                                             [0.03, 0.04])
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, 1.0, 1.0],
+                                             [0.03, 0.04, 0.05])
+        # Non-finite pillars and zero rates are rejected up front
+        # instead of poisoning every discount factor on the curve.
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, Inf],
+                                             [0.03, 0.04])
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, NaN],
+                                             [0.03, 0.04])
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, 1.0],
+                                             [0.03, NaN])
+        @test_throws ArgumentError ZeroCurve(anchor, [0.5, 1.0],
+                                             [0.03, Inf])
+        # Strictness is about times, not rates: a flat segment is fine.
+        flat = ZeroCurve(anchor, [0.5, 1.0], [0.03, 0.03])
+        @test zero_rate(flat, 0.75) ≈ 0.03
+    end
+
+    @testset "discount_at_anchor" begin
+        anchor = Date(2026, 1, 1)
+        curve = ZeroCurve(anchor, [0.5, 1.0], [0.03, 0.04])
+        # Stated convention: the discount factor at the anchor is
+        # exactly 1. The zero rate at t = 0 stays undefined, and
+        # negative times are rejected.
+        @test discount(curve, 0.0) == 1.0
+        @test discount(curve, anchor) == 1.0
+        @test_throws ArgumentError zero_rate(curve, 0.0)
+        @test_throws ArgumentError discount(curve, -0.5)
+    end
+
+    @testset "bootstrap_quote_validation" begin
+        anchor = Date(2026, 1, 1)
+        d6 = anchor + Month(6)
+        d12 = anchor + Month(12)
+        bill = ([CashFlow(d6, 100.0)], 99.0)
+        T = Tuple{Vector{CashFlow},Float64}
+        # An instrument with no cash flows: a validation error, not
+        # an indexing error from reading its final cash flow.
+        @test_throws ArgumentError bootstrap(T[bill, (CashFlow[], 50.0)],
+                                             anchor)
+        # Cash flows out of date order, or two on the same date.
+        unsorted = T[bill, ([CashFlow(d12, 2.0), CashFlow(d6, 102.0)], 99.0)]
+        @test_throws ArgumentError bootstrap(unsorted, anchor)
+        dupdates = T[bill, ([CashFlow(d6, 2.0), CashFlow(d6, 102.0)], 99.0)]
+        @test_throws ArgumentError bootstrap(dupdates, anchor)
+        # Non-positive or non-finite payment amounts.
+        zerocpn = T[bill, ([CashFlow(d6, 0.0), CashFlow(d12, 102.0)], 99.0)]
+        @test_throws ArgumentError bootstrap(zerocpn, anchor)
+        negamt = T[bill, ([CashFlow(d6, -2.0), CashFlow(d12, 102.0)], 99.0)]
+        @test_throws ArgumentError bootstrap(negamt, anchor)
+        # A cash flow dated before the curve anchor.
+        early = T[bill, ([CashFlow(anchor - Month(1), 2.0),
+                          CashFlow(d12, 102.0)], 99.0)]
+        @test_throws ArgumentError bootstrap(early, anchor)
+        # Duplicate maturity quotes are rejected, at any price: the
+        # sequential solver fits one pillar per maturity and no
+        # joint-fit method is offered.
+        @test_throws ArgumentError bootstrap(T[bill,
+                                               ([CashFlow(d6, 100.0)], 98.5)],
+                                             anchor)
+        @test_throws ArgumentError bootstrap(T[bill,
+                                               ([CashFlow(d6, 100.0)], 99.0)],
+                                             anchor)
+        # A non-positive quoted price.
+        @test_throws ArgumentError bootstrap(T[([CashFlow(d6, 100.0)], 0.0)],
+                                             anchor)
+    end
+
+    @testset "calibration_report" begin
+        anchor = Date(2026, 1, 1)
+        T = Tuple{Vector{CashFlow},Float64}
+        # Independent target pricing: piecewise-linear zero rates
+        # through the stated pillars, discounted with exp(-r*t)
+        # directly, never through the package's curve code.
+        function pv_independent(pillar_ts, zs, cfs)
+            function r_at(t)
+                t <= pillar_ts[1] && return zs[1]
+                t >= pillar_ts[end] && return zs[end]
+                i = searchsortedlast(pillar_ts, t)
+                w = (t - pillar_ts[i]) / (pillar_ts[i + 1] - pillar_ts[i])
+                return zs[i] * (1 - w) + zs[i + 1] * w
+            end
+            return sum(cf.amount *
+                       exp(-r_at(yearfrac(anchor, cf.date, :actual_365)) *
+                           yearfrac(anchor, cf.date, :actual_365))
+                       for cf in cfs)
+        end
+        function bond(months_coupons, cpn, face=100.0)
+            cfs = [CashFlow(anchor + Month(m), cpn) for m in months_coupons]
+            cfs[end] = CashFlow(cfs[end].date, cfs[end].amount + face)
+            return cfs
+        end
+
+        # Flat curve: bill plus coupon bonds, all priced at 4%.
+        flat_ts = [yearfrac(anchor, anchor + Month(m), :actual_365)
+                   for m in (3, 6, 12, 24)]
+        flat_inst = T[]
+        push!(flat_inst, ([CashFlow(anchor + Month(3), 100.0)],
+                          pv_independent(flat_ts, fill(0.04, 4),
+                                         [CashFlow(anchor + Month(3),
+                                                   100.0)])))
+        for m in (6, 12, 24)
+            cfs = bond(collect(6:6:m), 100 * (exp(0.02) - 1))
+            push!(flat_inst, (cfs, pv_independent(flat_ts, fill(0.04, 4),
+                                                  cfs)))
+        end
+        rep = calibration_report(flat_inst, anchor)
+        @test rep.status == :exact
+        @test rep.curve !== nothing
+        @test length(rep.rows) == length(flat_inst)
+        @test rep.max_residual <= 1e-8
+        for row in rep.rows
+            @test row.status == :exact
+            @test row.residual <= 1e-8
+            @test isapprox(row.model_price, row.quoted_price; atol=1e-8)
+        end
+        for z in rep.curve.zeros
+            @test isapprox(z, 0.04; atol=1e-6)
+        end
+
+        # Non-flat curve with a coupon between pillars: bill at 6m
+        # (3%), then an 18m bond (5% at its pillar) whose 12m coupon
+        # sits between the two pillars.
+        ts2 = [yearfrac(anchor, anchor + Month(m), :actual_365)
+               for m in (6, 18)]
+        bill2_cfs = [CashFlow(anchor + Month(6), 100.0)]
+        bond2_cfs = [CashFlow(anchor + Month(12), 2.0),
+                     CashFlow(anchor + Month(18), 102.0)]
+        inst2 = T[(bill2_cfs, pv_independent(ts2, [0.03, 0.05], bill2_cfs)),
+                  (bond2_cfs, pv_independent(ts2, [0.03, 0.05], bond2_cfs))]
+        rep2 = calibration_report(inst2, anchor)
+        @test rep2.status == :exact
+        @test rep2.max_residual <= 1e-8
+
+        # Highly steep curve: 2% at 3m rising to 30% at 2y.
+        ts3 = [yearfrac(anchor, anchor + Month(m), :actual_365)
+               for m in (3, 24)]
+        bill3_cfs = [CashFlow(anchor + Month(3), 100.0)]
+        bond3_cfs = bond(collect(6:6:24), 5.0)
+        inst3 = T[(bill3_cfs, pv_independent(ts3, [0.02, 0.30], bill3_cfs)),
+                  (bond3_cfs, pv_independent(ts3, [0.02, 0.30], bond3_cfs))]
+        rep3 = calibration_report(inst3, anchor)
+        @test rep3.status == :exact
+        @test rep3.max_residual <= 1e-8
+
+        # Steeply falling curve: 25% at 3m down to 1% at 2y. The
+        # interpolated forward over the falling segment is negative;
+        # that is reported, not constrained away, and the fit is
+        # still exact.
+        ts4 = [yearfrac(anchor, anchor + Month(m), :actual_365)
+               for m in (3, 24)]
+        bill4_cfs = [CashFlow(anchor + Month(3), 100.0)]
+        bond4_cfs = bond(collect(6:6:24), 5.0)
+        inst4 = T[(bill4_cfs, pv_independent(ts4, [0.25, 0.01], bill4_cfs)),
+                  (bond4_cfs, pv_independent(ts4, [0.25, 0.01], bond4_cfs))]
+        rep4 = calibration_report(inst4, anchor)
+        @test rep4.status == :exact
+        @test rep4.max_residual <= 1e-8
+        @test forward_rate(rep4.curve, ts4[1], ts4[2]) < 0
+
+        # Deliberately infeasible: the 6m bill pins the 6m discount
+        # factor at 0.99, so the bond's 6m coupon of 50 alone is
+        # worth 49.5; a quoted price of 10 has no solution at any
+        # 12m rate. The report says so and names the instrument;
+        # bootstrap rejects the same set.
+        d6 = anchor + Month(6)
+        d12 = anchor + Month(12)
+        bad = T[([CashFlow(d6, 100.0)], 99.0),
+                ([CashFlow(d6, 50.0), CashFlow(d12, 100.0)], 10.0)]
+        rep5 = calibration_report(bad, anchor)
+        @test rep5.status == :infeasible
+        @test rep5.curve === nothing
+        @test length(rep5.rows) == 2
+        @test rep5.rows[1].status == :exact
+        @test rep5.rows[2].status == :infeasible
+        @test rep5.rows[2].maturity == d12
+        @test_throws ArgumentError bootstrap(bad, anchor)
+
+        # Malformed quote sets are validation failures in the report
+        # API too, not calibration outcomes.
+        dup = T[([CashFlow(d6, 100.0)], 99.0),
+                ([CashFlow(d6, 100.0)], 98.5)]
+        @test_throws ArgumentError calibration_report(dup, anchor)
+    end
+
     @testset "analytics" begin
         anchor = Date(2026, 1, 15)
         terms = SukukTerms("Test", 1000.0, 0.05, anchor,

@@ -41,7 +41,7 @@ using Pluto
 Pluto.run(notebook="notebook.jl")
 ```
 
-No Julia handy? [Open the static snapshot](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html). It renders every notebook section at the default values, each computed by running the code. Serve the `docs/` folder from any static host (GitHub Pages works) to put it online.
+No Julia handy? [Open the dashboard](https://faiyazenayet.github.io/sukuklab/docs/dashboard.html). It presents the sourced IILM series record, calibrated short curve, and the UAE retail T-Sukuk's dated cash-flow valuation. Its yield control reprices the recorded cash flows locally. Serve the `docs/` folder from any static host (GitHub Pages works) to put it online.
 
 ## How the pieces fit
 
@@ -113,4 +113,4 @@ IILM short-term sukuk auction results, January 2026. Nasdaq Dubai sukuk listing 
 
 ## Honest limitations
 
-The IILM curve covers only the short end: one month to one year, four points, one auction date. It is a primary-market snapshot, not a live secondary curve. Different credits sit at different levels, so do not mix these pillars with other issuers' paper. The UAE example uses published issuance terms; I have no secondary prices for it, so its risk numbers are computed at par. Day-count and compounding conventions are documented choices; check them against your market before relying on them. The static dashboard shows the notebook's default values only; the sliders live in Pluto. This is analytics code, not investment advice.
+The IILM curve covers only the short end: four dated instruments from one auction. It is a primary-market observation, not a live secondary curve. Different credits sit at different levels, so do not mix these pillars with other issuers' paper. The UAE example uses published issuance terms; I have no secondary prices for it, so its risk numbers are computed at par. Day-count and compounding conventions are documented choices; check them against your market before relying on them. The dashboard explores the recorded curve and reprices the UAE example by yield; Pluto includes the broader instrument controls. This is analytics code, not investment advice.

@@ -457,4 +457,112 @@ using Dates
         end
     end
 
+    @testset "stage3_p0_1_iilm_reconstruction" begin
+        # The January 2026 IILM auction, reconstructed from the published
+        # series record: actual issue and maturity dates, series and ISIN
+        # identifiers, and the auction (observation) date stored apart
+        # from them. One validated loader reads data/iilm_2026-01.json;
+        # nothing in the package derives a maturity from a tenor again.
+        repo = joinpath(@__DIR__, "..")
+        datafile = joinpath(repo, "data", "iilm_2026-01.json")
+        record = load_auction_record(datafile)
+
+        @test record.issuer ==
+              "International Islamic Liquidity Management Corporation (IILM)"
+        @test record.currency == "USD"
+        # Observation time is the auction date, not an instrument date.
+        @test record.auction_date == Date(2026, 1, 13)
+        @test record.convention === :simple_act_365
+        @test length(record.instruments) == 4
+        @test length(record.sources) == 3
+        @test all(s -> startswith(s.url, "https://"), record.sources)
+        @test all(s -> s.retrieved == Date(2026, 11, 2), record.sources)
+
+        inst = record.instruments
+        # Source fixture: the published series, pinned exactly.
+        @test [i.series for i in inst] ==
+              ["260001", "260002", "260003", "260004"]
+        @test [i.isin for i in inst] ==
+              ["XS3270973699", "XS3270991162", "XS3270992996",
+               "XS3270995072"]
+        @test [i.tenor_label for i in inst] ==
+              ["1-month", "3-month", "6-month", "12-month"]
+        @test [i.profit_rate for i in inst] == [0.0381, 0.0384, 0.0382, 0.0345]
+        @test [i.amount_usd_m for i in inst] == [460.0, 635.0, 155.0, 50.0]
+        @test all(i -> i.issue_date == Date(2026, 1, 15), inst)
+        @test [i.maturity_date for i in inst] ==
+              [Date(2026, 2, 25), Date(2026, 4, 9), Date(2026, 7, 23),
+               Date(2027, 1, 14)]
+        @test [i.quote for i in inst] ==
+              ["3.81% for USD 460 million for 1-month tenor;",
+               "3.84% for USD 635 million for 3-month tenor;",
+               "3.82% for USD 155 million for 6-month tenor;",
+               "3.45% for USD 50 million for 12-month tenor."]
+
+        # Independent price check: straight calendar arithmetic on the
+        # fixture fields, no package pricing helpers involved.
+        for i in inst
+            days = Dates.value(i.maturity_date - i.issue_date)
+            expected = 100.0 / (1 + i.profit_rate * days / 365)
+            @test isapprox(model_price(i), expected; atol=1e-12)
+        end
+
+        # Curve construction anchors on the shared issue date and
+        # reprices every series to at most 1e-9 per 100 face.
+        @test auction_anchor(record) == Date(2026, 1, 15)
+        curve = auction_curve(record)
+        @test curve.anchor == Date(2026, 1, 15)
+        @test length(curve.pillars) == 4
+        residuals = pricing_residuals(record)
+        @test length(residuals) == 4
+        @test [r.series for r in residuals] == [i.series for i in inst]
+        @test all(r -> r.abs_residual <= 1e-9, residuals)
+
+        # Strict validation: corrupted records fail loudly.
+        raw = read(datafile, String)
+        tmp = mktempdir()
+        function variant(name, text)
+            p = joinpath(tmp, name)
+            write(p, text)
+            return p
+        end
+        # Maturity date removed from the first series.
+        @test_throws ArgumentError load_auction_record(variant(
+            "missing_maturity.json",
+            replace(raw, ", \"maturity_date\": \"2026-02-25\"" => ""; count=1)))
+        # Maturity date present but blank.
+        @test_throws ArgumentError load_auction_record(variant(
+            "blank_maturity.json",
+            replace(raw, "\"maturity_date\": \"2026-02-25\"" =>
+                    "\"maturity_date\": \"\""; count=1)))
+        # Issue date removed from the first series.
+        @test_throws ArgumentError load_auction_record(variant(
+            "missing_issue.json",
+            replace(raw, "\"issue_date\": \"2026-01-15\", " => ""; count=1)))
+        # Unknown rate-to-price convention.
+        @test_throws ArgumentError load_auction_record(variant(
+            "unknown_convention.json",
+            replace(raw, "\"rate_convention\": \"simple_act_365\"" =>
+                    "\"rate_convention\": \"act_360_money_market\""; count=1)))
+        # One series carrying a different currency than the record.
+        @test_throws ArgumentError load_auction_record(variant(
+            "mixed_currency.json",
+            replace(raw, "\"series\": \"260001\"" =>
+                    "\"series\": \"260001\", \"currency\": \"EUR\""; count=1)))
+        # One series carrying a different issuer than the record.
+        @test_throws ArgumentError load_auction_record(variant(
+            "mixed_issuer.json",
+            replace(raw, "\"series\": \"260002\"" =>
+                    "\"series\": \"260002\", \"issuer\": \"Another Issuer\"";
+                    count=1)))
+        # Maturity before the issue date.
+        @test_throws ArgumentError load_auction_record(variant(
+            "early_maturity.json",
+            replace(raw, "\"maturity_date\": \"2026-02-25\"" =>
+                    "\"maturity_date\": \"2026-01-10\""; count=1)))
+        # Not JSON at all.
+        @test_throws ArgumentError load_auction_record(variant(
+            "garbage.json", "{not json"))
+    end
+
 end

@@ -1,0 +1,17 @@
+{
+  "generated_by": "examples/make_iilm_residuals.jl",
+  "data_file": "data/iilm_2026-01.json",
+  "data_file_sha256": "09d7078fe64a5390e03c6f91fecd72a02d78690d6d32771b8f8216c1c3823c79",
+  "auction": "IILM short-term sukuk auction, January 2026 (first auction of 2026)",
+  "auction_date": "2026-01-13",
+  "curve_anchor_issue_date": "2026-01-15",
+  "rate_convention": "simple_act_365",
+  "face": 100,
+  "max_abs_residual_per_100": 0.0,
+  "instruments": [
+    {"series": "260001", "isin": "XS3270973699", "tenor_label": "1-month", "profit_rate": 0.0381, "amount_usd_m": 460.0, "issue_date": "2026-01-15", "maturity_date": "2026-02-25", "year_fraction": 0.11232876712328767, "model_price_per_100": 99.57385119738238, "curve_price_per_100": 99.57385119738238, "abs_residual_per_100": 0.0},
+    {"series": "260002", "isin": "XS3270991162", "tenor_label": "3-month", "profit_rate": 0.0384, "amount_usd_m": 635.0, "issue_date": "2026-01-15", "maturity_date": "2026-04-09", "year_fraction": 0.23013698630136986, "model_price_per_100": 99.1240152775907, "curve_price_per_100": 99.1240152775907, "abs_residual_per_100": 0.0},
+    {"series": "260003", "isin": "XS3270992996", "tenor_label": "6-month", "profit_rate": 0.0382, "amount_usd_m": 155.0, "issue_date": "2026-01-15", "maturity_date": "2026-07-23", "year_fraction": 0.5178082191780822, "model_price_per_100": 98.0603396165384, "curve_price_per_100": 98.0603396165384, "abs_residual_per_100": 0.0},
+    {"series": "260004", "isin": "XS3270995072", "tenor_label": "12-month", "profit_rate": 0.0345, "amount_usd_m": 50.0, "issue_date": "2026-01-15", "maturity_date": "2027-01-14", "year_fraction": 0.9972602739726028, "model_price_per_100": 96.67388851514205, "curve_price_per_100": 96.67388851514205, "abs_residual_per_100": 0.0}
+  ]
+}

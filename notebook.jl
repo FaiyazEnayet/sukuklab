@@ -108,7 +108,7 @@ end
 md"""
 ## 3. Bootstrap a profit-rate curve
 
-These four sliders start at the real IILM short-term sukuk auction clearing rates from January 2026: 3.81% (1m), 3.84% (3m), 3.82% (6m), 3.45% (12m). Each rate is treated as a simple annualized discount rate, and the bootstrap recovers every input point exactly. Move them and watch the curve change shape.
+These four sliders start at the real IILM short-term sukuk auction clearing rates from January 2026: 3.81% (1m), 3.84% (3m), 3.82% (6m), 3.45% (12m). The series were issued on 2026-01-15 and mature on their actual published dates (2026-02-25, 2026-04-09, 2026-07-23, 2027-01-14), loaded from `data/iilm_2026-01.json` through the package's auction-record loader. Each rate is treated as a simple annualized discount rate, and the bootstrap recovers every input point exactly. Move them and watch the curve change shape.
 """
 
 # ╔═╡ 3a4b5c6d-7e8f-4ad0-b1c2-d3e4f5a6b7c8
@@ -125,12 +125,13 @@ These four sliders start at the real IILM short-term sukuk auction clearing rate
 
 # ╔═╡ 7e8f9a0b-1c2d-4be4-f5a6-b7c8d9e0f1a2
 begin
-	nb_canchor = Date(2026, 1, 13)
+	nb_record = load_auction_record(joinpath(@__DIR__, "data", "iilm_2026-01.json"))
+	nb_canchor = auction_anchor(nb_record)
+	nb_slider_rates = (nb_r1m, nb_r3m, nb_r6m, nb_r12m)
 	nb_instruments = Tuple{Vector{CashFlow},Float64}[]
-	for (months, r) in ((1, nb_r1m), (3, nb_r3m), (6, nb_r6m), (12, nb_r12m))
-		mat = nb_canchor + Month(months)
-		T = yearfrac(nb_canchor, mat, :actual_365)
-		push!(nb_instruments, ([CashFlow(mat, 100.0)], 100.0 / (1 + r * T)))
+	for (inst, r) in zip(nb_record.instruments, nb_slider_rates)
+		T = yearfrac(nb_canchor, inst.maturity_date, :actual_365)
+		push!(nb_instruments, ([CashFlow(inst.maturity_date, 100.0)], 100.0 / (1 + r * T)))
 	end
 	nb_curve = bootstrap(nb_instruments, nb_canchor)
 	nb_fwd = forward_rate(nb_curve, 0.5, 1.0)

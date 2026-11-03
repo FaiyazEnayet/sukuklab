@@ -50,7 +50,8 @@ flowchart LR
     A["SukukTerms<br/>face, profit rate, dates, structure"] --> B["cashflows.jl<br/>payment_schedule()"]
     B --> C["CashFlow list"]
     C --> D["analytics.jl<br/>price, YTM, duration,<br/>convexity, DV01, shifts"]
-    E["IILM auction JSON<br/>4 clearing rates"] --> F["curve.jl<br/>bootstrap()"]
+    E["IILM auction JSON<br/>sourced series record"] --> M["marketdata.jl<br/>load_auction_record()"]
+    M --> F["curve.jl<br/>bootstrap()"]
     F --> G["ZeroCurve<br/>discount, forwards, par rates"]
     C --> H["portfolio.jl<br/>value-weighted yield,<br/>duration, convexity"]
 ```
@@ -61,6 +62,7 @@ flowchart LR
 | `src/sukuk.jl` | Closed-form pricing and yield to maturity for plain fixed-profit-rate sukuk. |
 | `src/cashflows.jl` | Distribution schedules for ijara, murabaha and wakala structures, bullet and installment shapes, 30/360 and Actual/365 day counts, accrued profit. |
 | `src/curve.jl` | Zero profit-rate curves, discount factors, forward rates, par rates, bootstrapping from market instruments. |
+| `src/marketdata.jl` | Validated loader for published auction records: series and ISIN identifiers, actual issue and maturity dates, provenance and quotes, and model pricing under the record's named rate convention. |
 | `src/analytics.jl` | Yield to maturity, current yield, Macaulay and modified duration, convexity, DV01, parallel shift repricing. |
 | `src/portfolio.jl` | Market-value-weighted yield, duration and convexity across holdings. |
 
@@ -70,22 +72,22 @@ Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk
 
 Every number here is computed by the package from the archived inputs and recorded in the canonical results file `examples/results.json`; the test suite recomputes them and checks the quoted values against it.
 
-Real published data from a bootstrapped a short end zero curve: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The curve recovers every auction point exactly, as a bootstrap should:
+Real published data from a bootstrapped short end zero curve: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The four series were issued on 2026-01-15 and mature on their actual published dates, so the curve anchors on the issue date and each pillar sits at its real time to maturity. The curve recovers every auction point exactly, as a bootstrap should:
 
 | Pillar | Zero rate |
 |---|---|
-| 0.085y | 3.8038% |
-| 0.247y | 3.8219% |
-| 0.496y | 3.7843% |
-| 1.000y | 3.3918% |
+| 0.112y | 3.8019% |
+| 0.230y | 3.8231% |
+| 0.518y | 3.7827% |
+| 0.997y | 3.3920% |
 
-The 6m to 12m forward rate is 3.0026%. The published 12m clearing rate sat below the 6m rate, and the curve keeps that shape.
+The 6m to 12m forward rate is 2.9987%. The published 12m clearing rate sat below the 6m rate, and the curve keeps that shape.
 
 I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued 2026-10-10 at a clean price of 1000 on 1000 face: YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices it to 957.66. Accrued profit at settlement: 1.41.
 
 The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
 
-The full suite is 149 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
+The full suite is 185 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, the published-terms IILM reconstruction fixture with its loader validation, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
 
 ## Reproducing the results
 
@@ -95,14 +97,15 @@ From a clean checkout, with Julia 1.10 or newer:
 julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 julia --project=. examples/demo.jl
 julia --project=. examples/make_results.jl
+julia --project=. examples/make_iilm_residuals.jl
 python3 test/check_parity.py
 ```
 
-The demo recomputes every number in Measured results from the archived inputs. `make_results.jl` regenerates the canonical results file (`examples/results.json`) and the shared valuation fixtures (`test/fixtures/valuation_parity.json`) from the package alone; CI fails if the checked-in files differ from a fresh regeneration. `check_parity.py` is a standard-library-only Python implementation of the same documented pricing formulas, and verifies that Julia and Python valuations agree to within 1e-8 per 1,000 face on the shared fixtures.
+The demo recomputes every number in Measured results from the archived inputs. `make_results.jl` regenerates the canonical results file (`examples/results.json`) and the shared valuation fixtures (`test/fixtures/valuation_parity.json`) from the package alone; CI fails if the checked-in files differ from a fresh regeneration. `make_iilm_residuals.jl` regenerates the IILM pricing-residual report (`examples/iilm_residuals.json` and `examples/iilm_residuals.csv`): each series' model price under the documented convention against its curve repricing, recorded with the SHA-256 of the source data file. `check_parity.py` is a standard-library-only Python implementation of the same documented pricing formulas, and verifies that Julia and Python valuations agree to within 1e-8 per 1,000 face on the shared fixtures.
 
 ## Real data
 
-Two public sources feed the demo. The IILM auction results are published clearing profit rates from January 2026, archived in `data/iilm_2026-01.json` with the source note. I treat them as simple annualized discount rates (Actual/365); that is a documented modeling choice, not a quoted convention. The UAE retail sukuk terms (5.06%, semi-annual, 2031-09-30 maturity) come from Nasdaq Dubai listing reports. Everything else in the demo is synthetic and labeled so.
+Two public sources feed the demo. The IILM record in `data/iilm_2026-01.json` reconstructs the January 2026 auction from its published series terms: series and ISIN identifiers, amounts, clearing profit rates, and the actual issue (2026-01-15) and maturity dates, taken from the IILM press release and auction results table and the Fitch Ratings Japan register, with the auction date (2026-01-13) stored separately as the observation time and the verbatim press-release quote kept for each series. A validated loader in the package reads that record; the demo, the notebook, the dashboard builder and the results generator all consume it instead of deriving dates from tenor labels. I treat the published rates as simple annualized discount rates (Actual/365); that is a documented modeling choice, not a quoted convention, and no clearing prices are recorded, because none are published with the rates. The UAE retail sukuk terms (5.06%, semi-annual, 2031-09-30 maturity) come from Nasdaq Dubai listing reports. Everything else in the demo is synthetic and labeled so.
 
 ## References
 

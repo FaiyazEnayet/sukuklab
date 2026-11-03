@@ -46,19 +46,11 @@ end
 # 1. IILM short-end curve (real published auction, January 2026)
 # ---------------------------------------------------------------------------
 
-anchor = Date(2026, 1, 13)
-iilm = [(1, 0.0381), (3, 0.0384), (6, 0.0382), (12, 0.0345)]
-instruments = Tuple{Vector{CashFlow},Float64}[]
-for (months, r) in iilm
-    mat = anchor + Month(months)
-    T = yearfrac(anchor, mat, :actual_365)
-    price = 100.0 / (1 + r * T)
-    push!(instruments, ([CashFlow(mat, 100.0)], price))
-end
+record = load_auction_record(joinpath(ROOT, "data", "iilm_2026-01.json"))
+anchor = auction_anchor(record)
+instruments = auction_instruments(record)
 curve = bootstrap(instruments, anchor)
-max_reprice_error = maximum(
-    abs(sum(cf.amount * discount(curve, cf.date) for cf in cfs) - price)
-    for (cfs, price) in instruments)
+max_reprice_error = maximum(r.abs_residual for r in pricing_residuals(record))
 fwd_6m_12m = forward_rate(curve, 0.5, 1.0)
 
 # ---------------------------------------------------------------------------
@@ -95,9 +87,13 @@ holdings = [mk_holding(pa, 990.0, 50, settle), mk_holding(pb, 1010.0, 30, settle
 results = Pair{String,Any}[
     "generated_by" => "examples/make_results.jl",
     "calculation_path" => "SukukLab Julia package only",
-    "iilm_anchor" => "2026-01-13",
-    "iilm_months" => [1, 3, 6, 12],
-    "iilm_rates" => [0.0381, 0.0384, 0.0382, 0.0345],
+    "iilm_anchor" => string(anchor),
+    "iilm_auction_date" => string(record.auction_date),
+    "iilm_series" => [i.series for i in record.instruments],
+    "iilm_isins" => [i.isin for i in record.instruments],
+    "iilm_months" => [i.tenor_months for i in record.instruments],
+    "iilm_rates" => [i.profit_rate for i in record.instruments],
+    "iilm_maturities" => [string(i.maturity_date) for i in record.instruments],
     "pillar_years" => collect(curve.pillars),
     "zero_rates" => collect(curve.zeros),
     "forward_6m_12m" => fwd_6m_12m,

@@ -54,18 +54,12 @@ sec2_murabaha = schedule_table("murabaha", true)
 sec2_wakala = schedule_table("wakala", false)
 
 # ------------------------------------------------ section 3: curve ---------
-# Read the real IILM auction rates straight from the data file.
-raw = read("data/iilm_2026-01.json", String)
-pairs = [(parse(Int, m.captures[1]), parse(Float64, m.captures[2]))
-         for m in eachmatch(r"\"months\":(\d+)[^}]*?\"profit_rate\":([\d.]+)", raw)]
-@assert length(pairs) == 4
-canchor = Date(2026, 1, 13)
-instruments = Tuple{Vector{CashFlow},Float64}[]
-for (months, r) in pairs
-    mat = canchor + Month(months)
-    T = yearfrac(canchor, mat, :actual_365)
-    push!(instruments, ([CashFlow(mat, 100.0)], 100.0 / (1 + r * T)))
-end
+# Load the real IILM auction record through the package's validated
+# loader: actual issue and maturity dates, not month arithmetic.
+record = load_auction_record(joinpath(@__DIR__, "..", "data",
+                                      "iilm_2026-01.json"))
+canchor = auction_anchor(record)
+instruments = auction_instruments(record)
 curve = bootstrap(instruments, canchor)
 fwd = forward_rate(curve, 0.5, 1.0)
 sec3 = html_table(["Pillar", "Zero rate"],
@@ -144,9 +138,11 @@ price in equal installments.</p>
 
 <h2>3. Bootstrapped profit-rate curve</h2>
 <p>From the real IILM short-term sukuk auction clearing rates, January 2026
-(1m 3.81%, 3m 3.84%, 6m 3.82%, 12m 3.45%), read from
-<code>data/iilm_2026-01.json</code> and treated as simple annualized discount
-rates.</p>
+(1m 3.81%, 3m 3.84%, 6m 3.82%, 12m 3.45%). The series were issued on
+15 January 2026 and mature on their actual published dates (25 February 2026,
+9 April 2026, 23 July 2026, 14 January 2027). Rates are read from
+<code>data/iilm_2026-01.json</code> through the package loader and treated as
+simple annualized discount rates.</p>
 $sec3
 <p>6m/12m forward rate: <strong>$(r4(100fwd))%</strong>.</p>
 $svg

@@ -41,19 +41,13 @@ def enrich(d,soup,root):
   # Explicit semiannual dates, matching Dates.Month increments in Julia.
   dates=[datetime.date(2026+(6+i*6)//12,(6+i*6)%12+1,15) for i in range(10)]
   cfs=[dict(date=x.isoformat(),amount=25.3+(1000 if i==9 else 0),t=(x-anchor).days/365) for i,x in enumerate(dates)]
-  raw=jsonfile(root,'data/iilm_2026-01.json');obs=[]
-  def collect(v):
-   if isinstance(v,dict):
-    if 'months' in v and 'profit_rate' in v:obs.append(v)
-    for x in v.values():collect(x)
-   elif isinstance(v,list):
-    for x in v:collect(x)
-  collect(raw);ca=datetime.date(2026,1,13);pillars=[];zeros=[]
+  raw=jsonfile(root,'data/iilm_2026-01.json');obs=raw['instruments']
+  ca=datetime.date.fromisoformat(obs[0]['issue_date']);pillars=[];zeros=[]
   for o in obs:
-   mm=ca.month-1+o['months'];mat=datetime.date(ca.year+mm//12,mm%12+1,ca.day);t=(mat-ca).days/365;pillars.append(t);zeros.append(math.log1p(o['profit_rate']*t)/t)
+   mat=datetime.date.fromisoformat(o['maturity_date']);t=(mat-ca).days/365;pillars.append(t);zeros.append(math.log1p(o['profit_rate']*t)/t)
   structures=[t for t in d['tables'] if t['title'].startswith(('Ijara','Murabaha','Wakala'))]
   d['sukuk']=dict(cashflows=cfs,pillars=pillars,zeros=zeros,structures=structures)
-  d['metrics']=[['13 Jan 2026','curve observation anchor'],['4','IILM maturity pillars'],['5.06%','example profit rate'],['1,000','example face · currency units']]
+  d['metrics']=[[ca.strftime('%d %b %Y'),'curve anchor (issue date)'],['4','IILM maturity pillars'],['5.06%','example profit rate'],['1,000','example face · currency units']]
  # Fingerprint the immutable Julia input, not the generated output itself.
  # Hashing dashboard.html here would change its own payload on every rebuild.
  source_files=[p for p in c['sources'] if p!='docs/dashboard.html']+['portfolio_ui/julia-source-snapshot.html']

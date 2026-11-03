@@ -1,9 +1,11 @@
 # SukukLab demo: sukuk and fixed-income analytics on real published terms.
 #
 # Real inputs used here, both public:
-# 1. IILM short-term sukuk auction, January 2026 (reported 2026-01-13).
+# 1. IILM short-term sukuk auction, January 2026 (auction held 2026-01-13,
+#    series issued 2026-01-15, maturing 2026-02-25 to 2027-01-14).
 #    Clearing profit rates: 1m 3.81%, 3m 3.84%, 6m 3.82%, 12m 3.45%.
-#    Full record in data/iilm_2026-01.json.
+#    Full sourced record in data/iilm_2026-01.json, read through the
+#    package's validated loader.
 # 2. UAE sovereign retail T-Sukuk, second tranche: 5-year, 5.06% annual
 #    profit rate, semi-annual distributions, issued 2026-09-30, matures
 #    2031-09-30 (Nasdaq Dubai listing reports, October 2026).
@@ -14,27 +16,20 @@ using Dates
 using SukukLab
 
 println("== 1. Short-end profit-rate curve from the IILM auction ==")
-anchor = Date(2026, 1, 13)
-# (months, clearing profit rate); treated as simple annualized discount
-# rates, Actual/365. See data/iilm_2026-01.json.
-iilm = [(1, 0.0381), (3, 0.0384), (6, 0.0382), (12, 0.0345)]
-instruments = Tuple{Vector{CashFlow},Float64}[]
-for (months, r) in iilm
-    mat = anchor + Month(months)
-    T = yearfrac(anchor, mat, :actual_365)
-    price = 100.0 / (1 + r * T)
-    push!(instruments, ([CashFlow(mat, 100.0)], price))
-end
+record = load_auction_record(joinpath(@__DIR__, "..", "data",
+                                      "iilm_2026-01.json"))
+anchor = auction_anchor(record)
+println("  auction $(record.auction_date), issued $anchor; ",
+        "the curve anchors on the issue date")
+instruments = auction_instruments(record)
 curve = bootstrap(instruments, anchor)
-for (t, z) in zip(curve.pillars, curve.zeros)
-    println("  T=$(round(t; digits=4))y  zero=$(round(100z; digits=4))%")
+for (inst, t, z) in zip(record.instruments, curve.pillars, curve.zeros)
+    println("  $(inst.series) $(inst.tenor_label) due $(inst.maturity_date)",
+            "  T=$(round(t; digits=4))y  zero=$(round(100z; digits=4))%")
 end
 # The curve must reprice its own inputs.
-for ((cfs, price), (t, z)) in zip(sort(instruments, by=x -> x[1][end].date),
-                                  zip(curve.pillars, curve.zeros))
-    repriced = sum(cf.amount * discount(curve, cf.date) for cf in cfs)
-    @assert abs(repriced - price) < 1e-9
-end
+residuals = pricing_residuals(record)
+@assert all(r -> r.abs_residual <= 1e-9, residuals)
 println("  reprice check: all four auction points recovered exactly")
 println("  6m/12m forward rate: ",
         round(100 * forward_rate(curve, 0.5, 1.0); digits=4), "%")

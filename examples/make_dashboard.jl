@@ -165,7 +165,7 @@ mkpath("docs")
 write("docs/dashboard.html", html)
 println("wrote docs/dashboard.html: $(length(html)) chars")
 
-# Apply the local presentation layer after the unchanged Julia calculations.
+# Render the sourced presentation from the checked-in Julia results.
 let py = get(ENV, "PYTHON", "python"), root = dirname(@__DIR__)
-    run(`$py $(joinpath(root, "portfolio_ui", "renderer.py")) --repo sukuklab --root $root --input $(joinpath(root, "docs", "dashboard.html")) --output $(joinpath(root, "docs", "dashboard.html"))`)
+    run(`$py $(joinpath(root, "examples", "make_dashboard.py"))`)
 end

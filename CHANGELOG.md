@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Golden fixtures pinning the schedule and day-count conventions to hand-computed values: a seven-month semiannual instrument (one regular period plus a one-month final stub paying its 30/360 fraction of 5 per 1,000 face, with accrued profit inside the stub accruing the stub distribution), and February-end to February-end 30/360 spans (2024-02-29 to 2025-02-28 is exactly one year under the bond-basis rules). The remaining acceptance clauses (month-end and leap-day schedules, duplicate pillar rejection, stub fractions) were audited against the existing fixtures and already hold.
+
+### Added
 - `calibration_report` in `src/curve.jl`: runs the sequential bootstrap and reports the outcome instead of only returning a curve or throwing. It returns a status (`:exact`, `:approximate` or `:infeasible`), the fitted curve (absent when infeasible), one repricing row per instrument (maturity, quoted price, model price, absolute residual, status), the largest residual, and a message naming the instrument that cannot be fitted when a quote set has no solution. The bootstrap's exactness scope is documented with it: it reprices the instruments it calibrates exactly, because each new pillar sits beyond every cash flow of the instruments already fitted; it is not a joint fit, and duplicate maturity quotes are rejected rather than averaged.
 - Two curve conventions are now stated where the API is defined: the discount factor at the anchor is exactly 1 (the zero rate at t = 0 remains undefined), and interpolated forwards may be negative on a steeply falling curve and are reported rather than floored at zero.
 

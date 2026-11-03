@@ -934,4 +934,54 @@ using Dates
         @test_throws ArgumentError sukuk_ytm(100.0, 100.0, 0.05, 1.3; m=2)
     end
 
+    @testset "stage3_su2_golden_fixtures" begin
+        # Golden fixtures pinning the day-count, month-end, leap-day
+        # and stub conventions to values computed by hand from the
+        # stated rules, so a silent change to any of them fails here.
+
+        # --- Seven-month semiannual instrument: one regular period
+        # plus a one-month final stub ---
+        # Issue 2026-01-15, maturity 2026-08-15, semiannual grid:
+        # the grid dates are 2026-07-15 and 2027-01-15, so the
+        # schedule is one regular six-month period and a final stub
+        # from 2026-07-15 to 2026-08-15.
+        seven = SukukTerms("Seven-month semiannual", 1000.0, 0.06,
+                           Date(2026, 1, 15), Date(2026, 8, 15), 2,
+                           "ijara")
+        speriods = distribution_periods(seven)
+        @test [p.date for p in speriods] ==
+              [Date(2026, 7, 15), Date(2026, 8, 15)]
+        @test speriods[1].regular
+        @test !speriods[2].regular
+        scfs = payment_schedule(seven)
+        # Regular period: 1000 * 0.06 / 2 = 30.
+        @test scfs[1].amount == 30.0
+        # Stub by hand, bond-basis 30/360: 2026-07-15 to 2026-08-15
+        # is (8 - 7) * 30 + (15 - 15) = 30 days, a 30/360 year
+        # fraction, so the stub distribution is 1000 * 0.06 *
+        # (30 / 360) = 5, not a full 30 semiannual distribution.
+        @test yearfrac(Date(2026, 7, 15), Date(2026, 8, 15),
+                       :thirty_360) == 30 / 360
+        @test scfs[2].amount ≈ 1000 + 60 * (30 / 360)
+        @test scfs[2].amount ≈ 1005.0
+        # Accrued inside the stub accrues the stub distribution:
+        # on 2026-07-31 the elapsed share is (16 / 360) / (30 / 360)
+        # of the stub period, so accrued is 5 * 16 / 30 = 8 / 3;
+        # halfway through the stub (2026-07-30) it is 2.5.
+        @test accrued_profit(seven, Date(2026, 7, 31)) ≈ 8 / 3
+        @test accrued_profit(seven, Date(2026, 7, 30)) ≈ 2.5
+
+        # --- February end to February end across a leap day ---
+        # Bond-basis 30/360: a first date on the last day of
+        # February counts as the 30th, and a second date on the
+        # last day of February counts as the 30th when the first
+        # date is also February-end. 2024-02-29 to 2025-02-28 is
+        # therefore (1 * 360 + 0 * 30 + (30 - 30)) / 360 = 1.
+        @test yearfrac(Date(2024, 2, 29), Date(2025, 2, 28),
+                       :thirty_360) == 1.0
+        # Same rule in a non-leap span.
+        @test yearfrac(Date(2026, 2, 28), Date(2027, 2, 28),
+                       :thirty_360) == 1.0
+    end
+
 end

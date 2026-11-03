@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- `calibration_report` in `src/curve.jl`: runs the sequential bootstrap and reports the outcome instead of only returning a curve or throwing. It returns a status (`:exact`, `:approximate` or `:infeasible`), the fitted curve (absent when infeasible), one repricing row per instrument (maturity, quoted price, model price, absolute residual, status), the largest residual, and a message naming the instrument that cannot be fitted when a quote set has no solution. The bootstrap's exactness scope is documented with it: it reprices the instruments it calibrates exactly, because each new pillar sits beyond every cash flow of the instruments already fitted; it is not a joint fit, and duplicate maturity quotes are rejected rather than averaged.
+- Two curve conventions are now stated where the API is defined: the discount factor at the anchor is exactly 1 (the zero rate at t = 0 remains undefined), and interpolated forwards may be negative on a steeply falling curve and are reported rather than floored at zero.
+
+### Fixed
+- `ZeroCurve` construction now enforces what its documentation always claimed: pillars must be strictly increasing (a repeated pillar previously passed the sortedness check and later divided by the zero gap between the duplicates during interpolation), and pillars and zero rates must be finite (a NaN zero rate previously constructed fine and silently made every discount factor NaN).
+- `bootstrap` validates the whole quote set before solving: an instrument with no cash flows (previously an indexing error when it was not the shortest instrument), cash flows out of date order or sharing a date, non-positive or non-finite cash-flow amounts, a cash flow dated before the anchor, a non-positive or non-finite quoted price, and duplicate maturity quotes (previously a silent duplicate pillar) are all rejected with explicit errors, and a quote with no solution is rejected naming the instrument's maturity.
+
+### Added
 - Contract-grade dated cash flows in `src/cashflows.jl`: schedules are modeled as explicit `DistributionPeriod`s (unadjusted contractual start and finish, payment date, regular/stub flag) generated from the anchor (`distribution_periods`), a `DayCount` enumeration (`Thirty360`, `Actual365`) alongside the existing symbols, a weekend business-day adjustment declared on the terms (`adjustment=:following`, `:modified_following` or `:preceding`; default `:unadjusted`), and an explicit payment-rounding policy on `payment_schedule` (default full precision; `rounding=:cent` rounds each payment to cents with the installment residual absorbed by the final payment).
 - `price_decomposition` and `ytm_from_clean_price` in `src/analytics.jl`: a settlement price as three distinct quantities (full price, accrued profit, clean price) that reconcile exactly, and yield recovery from a quoted clean price.
 

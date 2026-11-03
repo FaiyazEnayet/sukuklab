@@ -15,6 +15,11 @@ using Dates
 
 Present value of `cfs` at nominal annual yield `y` compounded `m`
 times. Times are measured from `anchor` with Actual/365.
+
+This present value is the **full price** (dirty price) of the
+remaining cash flows as of `anchor`: it includes the profit accrued
+since the previous distribution, which the buyer compensates the
+seller for. It is not the clean price; see `price_decomposition`.
 """
 function price_from_cashflows(cfs::Vector{CashFlow}, y::Real, anchor::Date;
                               m::Int=2)
@@ -32,8 +37,10 @@ end
 """
     ytm_from_price(cfs, price, anchor; m=2)
 
-Nominal annual yield implied by `price`, by bisection. Returns NaN
-when the price lies outside the attainable range.
+Nominal annual yield implied by `price`, by bisection. `price` is
+the full price of `cfs` as of `anchor` (see
+`price_from_cashflows`). Returns NaN when the price lies outside
+the attainable range.
 """
 function ytm_from_price(cfs::Vector{CashFlow}, price::Real, anchor::Date;
                         m::Int=2)
@@ -50,6 +57,64 @@ function ytm_from_price(cfs::Vector{CashFlow}, price::Real, anchor::Date;
         hi - lo < 1e-12 && break
     end
     return (lo + hi) / 2
+end
+
+"""
+    PriceDecomposition(full_price, accrued, clean_price)
+
+A settlement price split into its three distinct quantities: the
+`full_price` (the present value of the remaining cash flows, what
+the buyer pays in total), the `accrued` profit since the previous
+distribution (the part of the full price that compensates the
+seller), and the `clean_price`, the quoted price, defined as
+`full_price - accrued`. The three reconcile exactly:
+`clean_price + accrued == full_price`.
+"""
+struct PriceDecomposition
+    full_price::Float64
+    accrued::Float64
+    clean_price::Float64
+end
+
+"""
+    price_decomposition(terms, y, settlement; daycount=:thirty_360)
+
+Decompose the price of `terms` at nominal annual yield `y` for a
+settlement date into full price, accrued profit and clean price.
+The full price discounts the cash flows remaining after
+`settlement` at `y`, compounded `terms.freq` times per year;
+accrued is `accrued_profit(terms, settlement)`. On the issue date
+or a distribution date the accrued part is zero and the clean price
+equals the full price.
+"""
+function price_decomposition(terms::SukukTerms, y::Real, settlement::Date;
+                             daycount=:thirty_360)
+    settlement < terms.issue &&
+        throw(ArgumentError("settlement must not precede issue"))
+    cfs = remaining_cashflows(payment_schedule(terms), settlement)
+    full = price_from_cashflows(cfs, y, settlement; m=terms.freq)
+    accrued = settlement == terms.issue ? 0.0 :
+              accrued_profit(terms, settlement; daycount=daycount)
+    return PriceDecomposition(full, accrued, full - accrued)
+end
+
+"""
+    ytm_from_clean_price(terms, clean_price, settlement; daycount=:thirty_360)
+
+Nominal annual yield implied by a quoted clean price: the accrued
+profit at `settlement` is added back to give the full price, which
+is then inverted with `ytm_from_price`. Returns NaN when the implied
+full price lies outside the attainable range.
+"""
+function ytm_from_clean_price(terms::SukukTerms, clean_price::Real,
+                              settlement::Date; daycount=:thirty_360)
+    settlement < terms.issue &&
+        throw(ArgumentError("settlement must not precede issue"))
+    cfs = remaining_cashflows(payment_schedule(terms), settlement)
+    accrued = settlement == terms.issue ? 0.0 :
+              accrued_profit(terms, settlement; daycount=daycount)
+    return ytm_from_price(cfs, float(clean_price) + accrued, settlement;
+                          m=terms.freq)
 end
 
 """

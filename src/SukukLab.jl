@@ -15,12 +15,15 @@ include("analytics.jl")
 include("portfolio.jl")
 
 export sukuk_price, sukuk_ytm,
-    CashFlow, SukukTerms, yearfrac, distribution_dates, payment_schedule,
+    CashFlow, SukukTerms, DayCount, Thirty360, Actual365, yearfrac,
+    is_end_of_month, adjust_date, DistributionPeriod, distribution_periods,
+    distribution_dates, payment_schedule,
     remaining_cashflows, accrued_profit,
     ZeroCurve, zero_rate, discount, forward_rate, par_rate, bootstrap,
     AuctionSource, AuctionInstrument, AuctionRecord, load_auction_record,
     model_price, auction_anchor, auction_instruments, auction_curve,
     pricing_residuals,
+    PriceDecomposition, price_decomposition, ytm_from_clean_price,
     price_from_cashflows, ytm_from_price, current_yield,
     macaulay_duration, modified_duration, convexity, dv01,
     price_under_shift,

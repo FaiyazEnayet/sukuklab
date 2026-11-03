@@ -556,4 +556,191 @@ using Dates
             "garbage.json", "{not json"))
     end
 
+    @testset "stage3_p0_2_dated_cashflows" begin
+        # Contract-grade dated cash flows: schedules are generated from
+        # the unadjusted contractual anchor (issue plus k periods, never
+        # by stepping from an already-clamped date), regular and
+        # irregular periods are explicit, the 30/360 day count follows
+        # the bond-basis rules, and full, accrued and clean prices are
+        # three distinct quantities that reconcile.
+
+        # --- Anchor-based month-end generation (no stepping drift) ---
+        jan30 = SukukTerms("Jan30 monthly", 1000.0, 0.06,
+                           Date(2026, 1, 30), Date(2026, 6, 30), 12, "ijara")
+        @test distribution_dates(jan30) ==
+              [Date(2026, 2, 28), Date(2026, 3, 30), Date(2026, 4, 30),
+               Date(2026, 5, 30), Date(2026, 6, 30)]
+        @test length(payment_schedule(jan30)) == 5
+        @test all(p -> p.regular, distribution_periods(jan30))
+
+        jan31 = SukukTerms("Jan31 monthly", 1000.0, 0.06,
+                           Date(2026, 1, 31), Date(2026, 5, 31), 12, "ijara")
+        @test distribution_dates(jan31) ==
+              [Date(2026, 2, 28), Date(2026, 3, 31), Date(2026, 4, 30),
+               Date(2026, 5, 31)]
+        # An end-of-month anchor stays on month ends.
+        @test all(is_end_of_month, distribution_dates(jan31))
+        @test is_end_of_month(Date(2026, 2, 28))
+        @test !is_end_of_month(Date(2026, 2, 27))
+
+        aug31 = SukukTerms("Aug31 semiannual", 1000.0, 0.06,
+                           Date(2026, 8, 31), Date(2028, 8, 31), 2, "ijara")
+        # Leap day 2028-02-29 is a real payment date on the anchor grid.
+        @test distribution_dates(aug31) ==
+              [Date(2027, 2, 28), Date(2027, 8, 31), Date(2028, 2, 29),
+               Date(2028, 8, 31)]
+
+        nov30 = SukukTerms("Nov30 quarterly", 1000.0, 0.06,
+                           Date(2027, 11, 30), Date(2028, 11, 30), 4, "ijara")
+        @test distribution_dates(nov30) ==
+              [Date(2028, 2, 29), Date(2028, 5, 30), Date(2028, 8, 30),
+               Date(2028, 11, 30)]
+
+        leap = SukukTerms("Leap annual", 1000.0, 0.06,
+                          Date(2028, 2, 29), Date(2032, 2, 29), 1, "ijara")
+        @test distribution_dates(leap) ==
+              [Date(2029, 2, 28), Date(2030, 2, 28), Date(2031, 2, 28),
+               Date(2032, 2, 29)]
+        @test all(is_end_of_month, distribution_dates(leap))
+
+        # Actual retail dated fixture: the published UAE T-Sukuk terms
+        # (issued 2026-09-30, semi-annual, matures 2031-09-30) produce
+        # exactly the archived schedule dates.
+        uae = SukukTerms("UAE retail T-Sukuk 2031", 1000.0, 0.0506,
+                         Date(2026, 9, 30), Date(2031, 9, 30), 2, "ijara")
+        @test distribution_dates(uae) ==
+              [Date(2027, 3, 30), Date(2027, 9, 30), Date(2028, 3, 30),
+               Date(2028, 9, 30), Date(2029, 3, 30), Date(2029, 9, 30),
+               Date(2030, 3, 30), Date(2030, 9, 30), Date(2031, 3, 30),
+               Date(2031, 9, 30)]
+
+        # --- 30/360 bond basis, hand-computed from the stated rules ---
+        # D2 = 31 is kept when D1 < 30.
+        @test yearfrac(Date(2026, 1, 29), Date(2026, 1, 31),
+                       :thirty_360) == 2 / 360
+        # D2 = 31 becomes 30 when D1 is 30 or 31.
+        @test yearfrac(Date(2026, 1, 30), Date(2026, 1, 31),
+                       :thirty_360) == 0.0
+        @test yearfrac(Date(2026, 1, 31), Date(2026, 7, 31),
+                       :thirty_360) == 0.5
+        # February end-of-month: a last-day-of-February D1 counts as 30.
+        @test yearfrac(Date(2026, 2, 28), Date(2026, 3, 30),
+                       :thirty_360) == 30 / 360
+        @test yearfrac(Date(2026, 2, 28), Date(2026, 3, 31),
+                       :thirty_360) == 30 / 360
+        @test yearfrac(Date(2026, 2, 28), Date(2026, 8, 28),
+                       :thirty_360) == 178 / 360
+        @test yearfrac(Date(2024, 2, 29), Date(2024, 8, 29),
+                       :thirty_360) == 179 / 360
+        # D2 on the last day of February with D1 elsewhere keeps its day.
+        @test yearfrac(Date(2026, 1, 31), Date(2026, 2, 28),
+                       :thirty_360) == 28 / 360
+        @test yearfrac(Date(2026, 1, 15), Date(2026, 7, 15),
+                       :thirty_360) == 0.5
+        # The enumeration names the same conventions.
+        @test DayCount(:thirty_360) === Thirty360
+        @test DayCount(:actual_365) === Actual365
+        @test yearfrac(Date(2026, 2, 28), Date(2026, 8, 28),
+                       Thirty360) == 178 / 360
+        @test yearfrac(Date(2026, 1, 1), Date(2027, 1, 1),
+                       Actual365) == 1.0
+        @test_throws ArgumentError DayCount(:act_360)
+        @test_throws ArgumentError yearfrac(Date(2026, 1, 1),
+                                            Date(2026, 7, 1), :act_360)
+
+        # --- Final stub: explicitly irregular, accrued by fraction ---
+        stub = SukukTerms("Stub", 1000.0, 0.06,
+                          Date(2026, 1, 15), Date(2026, 8, 20), 2, "ijara")
+        speriods = distribution_periods(stub)
+        @test [p.date for p in speriods] ==
+              [Date(2026, 7, 15), Date(2026, 8, 20)]
+        @test speriods[1].regular
+        @test !speriods[2].regular
+        scfs = payment_schedule(stub)
+        @test scfs[1].amount == 30.0
+        # Stub distribution: 35/360 of a year at 6% on 1000.
+        @test scfs[2].amount ≈ 1000 + 60 * (35 / 360)
+        # Accrued inside the stub accrues the stub distribution itself.
+        @test accrued_profit(stub, Date(2026, 8, 1)) ≈ 60 * (16 / 360)
+        # Accrued inside the regular first period is unchanged.
+        @test accrued_profit(stub, Date(2026, 4, 15)) ≈ 15.0
+
+        short_stub = SukukTerms("Short stub", 1000.0, 0.06,
+                                Date(2026, 1, 15), Date(2026, 3, 10), 2,
+                                "ijara")
+        @test length(distribution_periods(short_stub)) == 1
+        @test !distribution_periods(short_stub)[1].regular
+        @test payment_schedule(short_stub)[1].amount ≈ 1000 + 60 * (55 / 360)
+
+        # --- Settlement on a distribution date ---
+        semi = SukukTerms("Semi", 1000.0, 0.06,
+                          Date(2026, 1, 15), Date(2028, 1, 15), 2, "ijara")
+        oncpn = Date(2026, 7, 15)
+        @test accrued_profit(semi, oncpn) == 0.0
+        @test length(remaining_cashflows(payment_schedule(semi), oncpn)) == 3
+        dec_on = price_decomposition(semi, 0.05, oncpn)
+        @test dec_on.accrued == 0.0
+        @test dec_on.clean_price == dec_on.full_price
+        dec_issue = price_decomposition(semi, 0.05, Date(2026, 1, 15))
+        @test dec_issue.accrued == 0.0
+        @test dec_issue.clean_price == dec_issue.full_price
+
+        # --- Full / accrued / clean decomposition (acceptance) ---
+        settle = Date(2026, 10, 10)
+        @test price_decomposition(uae, 0.0506, settle).accrued ≈ 25.3 / 18
+        for y in (0.03, 0.0506, 0.07)
+            dec = price_decomposition(uae, y, settle)
+            # clean + accrued = full to 1e-10 per 1,000 face.
+            @test abs(dec.clean_price + dec.accrued - dec.full_price) <= 1e-10
+            # Clean-price round trip: recover the yield from the clean
+            # price, reprice, and the full price returns to 1e-8.
+            y2 = ytm_from_clean_price(uae, dec.clean_price, settle)
+            @test abs(y2 - y) <= 1e-7
+            @test abs(price_decomposition(uae, y2, settle).full_price -
+                      dec.full_price) <= 1e-8
+        end
+
+        # --- Business-day adjustment is declared on the terms ---
+        @test jan30.adjustment === :unadjusted
+        fol = SukukTerms("Following", 1000.0, 0.06,
+                         Date(2026, 1, 31), Date(2026, 4, 30), 12, "ijara";
+                         adjustment=:following)
+        # 2026-02-28 is a Saturday: following pays Monday 2026-03-02.
+        @test distribution_dates(fol) ==
+              [Date(2026, 3, 2), Date(2026, 3, 31), Date(2026, 4, 30)]
+        modfol = SukukTerms("Modified following", 1000.0, 0.06,
+                            Date(2026, 1, 31), Date(2026, 4, 30), 12,
+                            "ijara"; adjustment=:modified_following)
+        # Following would cross into March, so it falls back to Friday.
+        @test distribution_dates(modfol) ==
+              [Date(2026, 2, 27), Date(2026, 3, 31), Date(2026, 4, 30)]
+        prec = SukukTerms("Preceding", 1000.0, 0.06,
+                          Date(2026, 1, 31), Date(2026, 3, 31), 12, "ijara";
+                          adjustment=:preceding)
+        @test distribution_dates(prec) ==
+              [Date(2026, 2, 27), Date(2026, 3, 31)]
+        @test_throws ArgumentError SukukTerms("Bad adj", 1000.0, 0.06,
+                                              Date(2026, 1, 31),
+                                              Date(2026, 4, 30), 12, "ijara";
+                                              adjustment=:next_business_day)
+
+        # --- Rounding at payment is an explicit, opt-in policy ---
+        rcfs = payment_schedule(stub; rounding=:cent)
+        @test rcfs[1].amount == 30.0
+        @test rcfs[2].amount == 1005.83
+        mround = SukukTerms("Murabaha rounding", 1000.0, 0.05,
+                            Date(2026, 1, 15), Date(2026, 10, 15), 4,
+                            "murabaha"; amortizing=true)
+        mcfs = payment_schedule(mround; rounding=:cent)
+        mtotal = 1000 * (1 + 0.05 * 273 / 365)
+        @test all(cf -> cf.amount == round(cf.amount; digits=2), mcfs)
+        @test sum(cf.amount for cf in mcfs) ≈ mtotal atol=0.005
+        @test_throws ArgumentError payment_schedule(stub; rounding=:millis)
+
+        # --- Closed form refuses non-whole-period maturities ---
+        @test_throws ArgumentError sukuk_price(100.0, 0.05, 0.05, 1.3; m=2)
+        @test_throws ArgumentError sukuk_price(100.0, 0.05, 0.05, 5.0; m=2.5)
+        @test_throws ArgumentError sukuk_ytm(100.0, 100.0, 0.05, 1.3; m=2)
+    end
+
 end

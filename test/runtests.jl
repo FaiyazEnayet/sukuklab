@@ -984,6 +984,8 @@ using Dates
                        :thirty_360) == 1.0
     end
 
+    include("stage3_su7.jl")
+
     @testset "stage3_su6_sparse_curve_model_risk" begin
         anchor = Date(2026, 1, 15)
 

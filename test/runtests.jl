@@ -986,4 +986,209 @@ using Dates
 
     include("stage3_su7.jl")
 
+    @testset "stage3_su6_sparse_curve_model_risk" begin
+        anchor = Date(2026, 1, 15)
+
+        # --- Known-answer fixture -----------------------------------------
+        # The "true" curve for the fixture is piecewise constant in the
+        # forward rate: log discounts are piecewise linear with segment
+        # slopes -0.04, -0.032, -0.036, -0.024 between pillars at
+        # 0.25, 0.5, 1.0 and 2.0 years. Every expected value below is
+        # computed from that definition by hand, not from the code
+        # under test.
+        ft = [0.25, 0.5, 1.0, 2.0]
+        fL = [-0.01, -0.018, -0.036, -0.06]       # log discounts at pillars
+        fz = [0.04, 0.036, 0.036, 0.03]          # -fL ./ ft
+        fd = exp.(fL)
+        fcurve = ZeroCurve(anchor, ft, fz)
+        ldc = LogDiscountCurve(anchor, ft, fd)
+        smc = SmoothCurve(anchor, ft, fd)
+
+        # All three schemes pass through the pillars exactly.
+        for c in (fcurve, ldc, smc)
+            for (t, d) in zip(ft, fd)
+                @test discount(c, t) ≈ d atol = 1e-12
+            end
+            @test discount(c, 0.0) == 1.0
+        end
+
+        # Log-discount interpolation reproduces the true curve
+        # everywhere, because the true log discounts are piecewise
+        # linear in t:
+        #   t = 0.375: log df = -0.01 - 0.032 * 0.125 = -0.014
+        #   t = 1.5:   log df = -0.036 - 0.024 * 0.5  = -0.048
+        #   t = 4.0 (extrapolation at the last segment's forward):
+        #              log df = -0.06 - 0.024 * 2.0    = -0.108
+        @test discount(ldc, 0.375) ≈ exp(-0.014) atol = 1e-12
+        @test discount(ldc, 1.5) ≈ exp(-0.048) atol = 1e-12
+        @test discount(ldc, 4.0) ≈ exp(-0.108) atol = 1e-12
+        @test forward_rate(ldc, 0.25, 0.5) ≈ 0.032 atol = 1e-12
+
+        # Linear-zero interpolation does not: at t = 0.375 it uses the
+        # averaged zero rate 0.038, so its discount factor is
+        # exp(-0.038 * 0.375) = exp(-0.01425), about 2.5e-4 below the
+        # true exp(-0.014). The gap is the model risk, in one number.
+        @test discount(fcurve, 0.375) ≈ exp(-0.01425) atol = 1e-12
+        @test discount(ldc, 0.375) - discount(fcurve, 0.375) > 2e-4
+
+        # A constant zero curve is reproduced exactly by all three
+        # schemes at every time, including in extrapolation: with no
+        # shape in the data there is nothing for schemes to disagree
+        # about.
+        ct = [0.5, 1.0, 2.0]
+        cz = fill(0.04, 3)
+        cd = exp.(-0.04 .* ct)
+        for c in (ZeroCurve(anchor, ct, cz),
+                  LogDiscountCurve(anchor, ct, cd),
+                  SmoothCurve(anchor, ct, cd))
+            for t in (0.25, 0.75, 1.5, 3.0, 10.0)
+                @test discount(c, t) ≈ exp(-0.04 * t) atol = 1e-12
+                @test zero_rate(c, t) ≈ 0.04 atol = 1e-10
+            end
+        end
+
+        # The smooth scheme keeps discounts monotone on a dense grid
+        # when the pillar discounts are monotone: its constraint is
+        # that smoothness cannot manufacture a rising discount factor
+        # (a negative forward) out of falling ones.
+        grid = collect(0.01:0.01:3.0)
+        sdfs = [discount(smc, t) for t in grid]
+        @test all(sdfs[i] >= sdfs[i + 1] for i in 1:(length(sdfs) - 1))
+        # And it stays close to the data-consistent log-discount path
+        # between pillars rather than wandering: at 0.375 its log
+        # discount is within 0.002 of the true -0.014.
+        @test abs(log(discount(smc, 0.375)) - (-0.014)) < 0.002
+
+        # Constructor validation.
+        @test_throws ArgumentError LogDiscountCurve(anchor, ft,
+                                                    [1.0, 0.9, 0.8])
+        @test_throws ArgumentError LogDiscountCurve(anchor, ft,
+                                                    [1.0, 0.9, 0.8, 0.0])
+        @test_throws ArgumentError LogDiscountCurve(anchor, ft,
+                                                    [1.0, 0.9, 0.8, -0.5])
+        @test_throws ArgumentError SmoothCurve(anchor, [1.0], [0.96])
+        @test_throws ArgumentError SmoothCurve(anchor, ft,
+                                               [1.0, 0.9, 0.8, NaN])
+
+        # --- Report on the fixture pillars as market quotes ---------------
+        # Discount instruments at 91, 182, 365 and 730 days with the
+        # fixture zero rates: the sparse-data situation in miniature.
+        days = [91, 182, 365, 730]
+        ts = [yearfrac(anchor, anchor + Day(d), :actual_365) for d in days]
+        zs = [0.04, 0.036, 0.036, 0.03]
+        insts = Tuple{Vector{CashFlow},Float64}[
+            ([CashFlow(anchor + Day(d), 100.0)], 100.0 * exp(-z * t))
+            for (d, z, t) in zip(days, zs, ts)]
+        rep = interpolation_model_risk(insts, anchor)
+        @test rep.negative_forward_policy == :allow
+        @test [s.name for s in rep.schemes] ==
+            [:linear_zero, :log_discount, :smooth]
+        # Calibration is exact for every scheme: each interpolator
+        # passes through the fitted pillars by construction, and the
+        # report says so with numbers instead of asserting it.
+        for s in rep.schemes
+            @test s.max_calibration_residual <= 1e-8
+            @test length(s.calibration_rows) == 4
+        end
+        # Held-out rows: one per pillar per scheme, and the errors are
+        # honestly large. With pillars this sparse, no scheme predicts
+        # a dropped pillar to within 5 cents per 100 face everywhere;
+        # a report claiming otherwise would be manufacturing accuracy.
+        @test length(rep.held_out) == 12
+        @test all(r -> r.status == :ok, rep.held_out)
+        @test maximum(r -> r.price_error, rep.held_out) > 0.05
+        # Held-out numbers match an independent recomputation through
+        # the public constructors: drop the pillar, refit, reprice.
+        for r in rep.held_out
+            i = findfirst(==(r.maturity),
+                          [cfs[end].date for (cfs, _) in insts])
+            sub = bootstrap([insts[j] for j in eachindex(insts) if j != i],
+                            anchor)
+            scheme_curve = r.scheme == :linear_zero ? sub :
+                           r.scheme == :log_discount ? LogDiscountCurve(sub) :
+                           SmoothCurve(sub)
+            @test 100.0 * discount(scheme_curve, r.time) ≈ r.predicted_price atol = 1e-9
+        end
+        # Stress dispersion: the 10y reference price moves far more
+        # across schemes than the 5y, and every scheme reports a real
+        # scenario range for it rather than a single averaged number.
+        s5 = only(filter(r -> r.maturity == 5.0, rep.stress))
+        s10 = only(filter(r -> r.maturity == 10.0, rep.stress))
+        @test s10.spread > s5.spread > 0
+        for s in rep.schemes
+            st10 = only(filter(r -> r.maturity == 10.0, s.stress))
+            @test st10.scenario_max >= st10.base_price >= st10.scenario_min
+            @test st10.scenario_range > 0
+        end
+
+        # A held-out pillar that cannot be refit without it (removing
+        # the only discount instrument leaves a coupon instrument the
+        # sequential bootstrap cannot start from) is reported as not
+        # identified, not silently dropped or fitted another way.
+        mixed = Tuple{Vector{CashFlow},Float64}[
+            ([CashFlow(anchor + Day(182), 100.0)],
+             100.0 * exp(-0.03 * (182 / 365))),
+            ([CashFlow(anchor + Day(182), 3.0),
+              CashFlow(anchor + Day(365), 103.0)],
+             3.0 * exp(-0.03 * (182 / 365)) + 103.0 * exp(-0.03 * (365 / 365)))]
+        mrep = interpolation_model_risk(mixed, anchor)
+        first_rows = filter(r -> r.maturity == anchor + Day(182), mrep.held_out)
+        @test length(first_rows) == 3
+        @test all(r -> r.status == :not_identified, first_rows)
+        @test all(r -> isnan(r.price_error), first_rows)
+        # Holding out the coupon instrument instead leaves a single
+        # pillar: the two discount-factor schemes that need only a
+        # segment still price it, and the smooth scheme, which needs
+        # at least two pillars, is not identified on the reduced set.
+        second_rows = filter(r -> r.maturity == anchor + Day(365),
+                             mrep.held_out)
+        @test length(second_rows) == 3
+        by_scheme = Dict(r.scheme => r.status for r in second_rows)
+        @test by_scheme[:linear_zero] == :ok
+        @test by_scheme[:log_discount] == :ok
+        @test by_scheme[:smooth] == :not_identified
+
+        # --- Negative-forward policy ---------------------------------------
+        # A steeply falling two-pillar curve implies deeply negative
+        # forwards. The policy decides what the report does with that
+        # fact; no scheme floors it away.
+        t1 = 182 / 365
+        steep_insts = Tuple{Vector{CashFlow},Float64}[
+            ([CashFlow(anchor + Day(182), 100.0)], 100.0 * exp(-0.05 * t1)),
+            ([CashFlow(anchor + Day(365), 100.0)], 100.0)]
+        rep_allow = interpolation_model_risk(steep_insts, anchor)
+        lz = only(filter(s -> s.name == :linear_zero, rep_allow.schemes))
+        ld = only(filter(s -> s.name == :log_discount, rep_allow.schemes))
+        @test -0.10 < lz.min_forward < -0.07
+        @test ld.min_forward ≈ -0.05 atol = 1e-3
+        @test lz.has_negative_forward && lz.policy_status == :ok
+        rep_reject = interpolation_model_risk(steep_insts, anchor;
+                                              negative_forward_policy=:reject)
+        @test rep_reject.negative_forward_policy == :reject
+        @test all(s -> s.policy_status == :violates_policy, rep_reject.schemes)
+        @test_throws ArgumentError interpolation_model_risk(
+            steep_insts, anchor; negative_forward_policy=:floor)
+
+        # --- The real sparse record ----------------------------------------
+        # The January 2026 IILM record: four discount series inside one
+        # year. The report must show exact calibration, positive
+        # forwards on the observed segment, and scheme divergence only
+        # where the data runs out.
+        record = load_auction_record(joinpath(@__DIR__, "..", "data",
+                                              "iilm_2026-01.json"))
+        irep = interpolation_model_risk(auction_instruments(record),
+                                        auction_anchor(record))
+        @test irep.pillars == auction_curve(record).pillars
+        for s in irep.schemes
+            @test s.max_calibration_residual <= 1e-8
+            @test s.min_forward >= -1e-12
+            @test s.policy_status == :ok
+        end
+        @test length(irep.held_out) == 12
+        @test all(r -> r.status == :ok, irep.held_out)
+        i10 = only(filter(r -> r.maturity == 10.0, irep.stress))
+        @test i10.spread > 0
+        @test all(r -> isfinite(r.zero_rate), irep.schemes[1].long_zero_rates)
+    end
+
 end

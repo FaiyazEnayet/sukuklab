@@ -11,12 +11,21 @@ jobs:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: "1"
+          version: "1.13"
       - name: Run tests
         run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
       - name: Check generated results are fresh
         run: |
           julia --project=. examples/make_results.jl
           git diff --exit-code -- examples/results.json test/fixtures/valuation_parity.json
+      # The generator runs in CI so the Julia renderer is exercised
+      # on every push; the committed snapshot itself is regenerated
+      # separately, so this step restores it afterwards.
+      - name: Run Julia dashboard generator
+        env:
+          PYTHON: python3
+        run: |
+          julia --project=. examples/make_dashboard.jl
+          git checkout -- docs/dashboard.html
       - name: Python parity check
         run: python3 test/check_parity.py

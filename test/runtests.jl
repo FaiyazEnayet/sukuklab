@@ -619,7 +619,10 @@ using Dates
         @test occursin(string(round(weighted_convexity(hs); digits=4)),
                        readme)
         # Stale claims must stay fixed: real test count, real entry point.
-        @test !occursin("83 tests", readme)
+        # The guard names the stale count with its sentence lead-in so a
+        # later count that merely contains those digits (483, 1083)
+        # does not trip it.
+        @test !occursin("is 83 tests", readme)
         @test occursin("src/SukukLab.jl", readme)
         @test !occursin("src/sukuklab.jl", readme)
     end
@@ -1190,5 +1193,7 @@ using Dates
         @test i10.spread > 0
         @test all(r -> isfinite(r.zero_rate), irep.schemes[1].long_zero_rates)
     end
+
+    include("stage3_su3.jl")
 
 end

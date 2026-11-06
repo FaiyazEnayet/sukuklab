@@ -103,6 +103,22 @@ function discount(curve::ZeroCurve, d::Date)
 end
 
 """
+    bump_pillar(curve, i, bps)
+
+A copy of `curve` with the zero rate at pillar `i` moved by `bps`
+basis points. The other pillars are unchanged. Used for key-rate
+sensitivities: repricing on the bumped curve isolates the price
+effect of that one pillar.
+"""
+function bump_pillar(curve::ZeroCurve, i::Int, bps::Real)
+    1 <= i <= length(curve.pillars) ||
+        throw(ArgumentError("pillar index $i out of range"))
+    zeros = copy(curve.zeros)
+    zeros[i] += float(bps) / 1e4
+    return ZeroCurve(curve.anchor, copy(curve.pillars), zeros)
+end
+
+"""
     forward_rate(curve, t1, t2)
 
 Continuously compounded forward profit rate between year fractions

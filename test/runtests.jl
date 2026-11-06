@@ -1,6 +1,7 @@
 using Test
 using SukukLab
 using Dates
+using LinearAlgebra
 
 @testset "SukukLab" begin
 
@@ -1195,5 +1196,7 @@ using Dates
     end
 
     include("stage3_su3.jl")
+
+    include("stage3_su4.jl")
 
 end

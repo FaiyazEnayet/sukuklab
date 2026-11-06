@@ -9,6 +9,7 @@ times per year, the market convention for quoted sukuk yields.
 """
 
 using Dates
+using LinearAlgebra
 
 """
     price_from_cashflows(cfs, y, anchor; m=2)
@@ -392,4 +393,256 @@ function curve_dv01(ctx::ValuationContext{ZeroCurve}, terms::SukukTerms;
     moved = price(ValuationContext(ctx.settlement, bumped;
                                    daycount=ctx.daycount), terms)
     return (base - moved) / float(bump_bps)
+end
+
+# ---------------------------------------------------------------------------
+# Batched curve pricing and numerical benchmarks.
+#
+# Pricing one instrument at a time rebuilds its schedule, filters the
+# remaining flows and recomputes every year fraction on each call. For
+# a portfolio that work is repeated per instrument even though the
+# curve and settlement are shared. A PricedBatch prepares every
+# schedule once, as flat year fractions and amounts, and prices the
+# whole portfolio into a preallocated vector with a reused discount
+# buffer, so the hot loop allocates nothing.
+# ---------------------------------------------------------------------------
+
+"""
+    PricedBatch(times, amounts, offsets, discounts, prices, settle_t, settlement)
+
+A portfolio prepared for batched curve pricing. `times` and
+`amounts` hold every remaining cash flow of every instrument in one
+flat layout, `offsets[i]` is the first flat index of instrument `i`
+(with `offsets[end]` one past the last flow), `discounts` is a
+scratch buffer reused on every pricing pass, `prices` holds one
+price per instrument, and `settle_t` is the settlement year fraction
+from the curve anchor. Build one with `prepare_batch`; never
+construct it by hand.
+"""
+struct PricedBatch
+    times::Vector{Float64}
+    amounts::Vector{Float64}
+    offsets::Vector{Int}
+    discounts::Vector{Float64}
+    prices::Vector{Float64}
+    settle_t::Float64
+    settlement::Date
+end
+
+"""
+    prepare_batch(terms, settlement, curve)
+
+Prepare `terms` for batched pricing on `curve` at `settlement`:
+build each instrument's remaining schedule once and lay the cash
+flows out flat, with a preallocated discount buffer and price
+vector. The curve anchor must not be after settlement, and
+settlement must not precede any instrument's issue date. An
+instrument with no flows after settlement prices at zero.
+"""
+function prepare_batch(terms::Vector{SukukTerms}, settlement::Date,
+                       curve::ZeroCurve)
+    isempty(terms) && throw(ArgumentError("terms must not be empty"))
+    curve.anchor > settlement &&
+        throw(ArgumentError("curve anchor must not be after settlement"))
+    for t in terms
+        settlement < t.issue &&
+            throw(ArgumentError("settlement must not precede issue"))
+    end
+    times = Float64[]
+    amounts = Float64[]
+    offsets = Int[1]
+    for t in terms
+        for cf in remaining_cashflows(payment_schedule(t), settlement)
+            push!(times, yearfrac(curve.anchor, cf.date, :actual_365))
+            push!(amounts, cf.amount)
+        end
+        push!(offsets, length(times) + 1)
+    end
+    nflows = length(times)
+    return PricedBatch(times, amounts, offsets,
+                       Vector{Float64}(undef, nflows),
+                       Vector{Float64}(undef, length(terms)),
+                       yearfrac(curve.anchor, settlement, :actual_365),
+                       settlement)
+end
+
+"""
+    price_batch!(batch, curve)
+
+Price every instrument in `batch` on `curve` into the batch's
+preallocated price vector, reusing its discount buffer. The same
+batch can be repriced on another curve without rebuilding the
+schedules. Allocates nothing after warmup. Returns the price
+vector.
+"""
+function price_batch!(batch::PricedBatch, curve::ZeroCurve)
+    df_settle = discount(curve, batch.settle_t)
+    @inbounds for k in eachindex(batch.times)
+        batch.discounts[k] = discount(curve, batch.times[k])
+    end
+    @inbounds for i in eachindex(batch.prices)
+        s = 0.0
+        for k in batch.offsets[i]:(batch.offsets[i + 1] - 1)
+            s += batch.amounts[k] * batch.discounts[k]
+        end
+        batch.prices[i] = s / df_settle
+    end
+    return batch.prices
+end
+
+"""
+    price_batch(terms, settlement, curve) / price_batch(ctx, terms)
+
+Price every instrument in `terms` on `curve` at `settlement` in one
+batched pass, returning a vector with one full price per instrument
+in the same order as `terms`. The `ValuationContext` form takes the
+settlement date and curve from the context. Prices agree with the
+per-instrument `price` path; see the SU4 testset for the
+cross-check against an independent high-precision oracle.
+"""
+function price_batch(terms::Vector{SukukTerms}, settlement::Date,
+                     curve::ZeroCurve)
+    batch = prepare_batch(terms, settlement, curve)
+    return price_batch!(batch, curve)
+end
+
+function price_batch(ctx::ValuationContext{ZeroCurve},
+                     terms::Vector{SukukTerms})
+    return price_batch(terms, ctx.settlement, ctx.basis)
+end
+
+"""
+    BenchmarkRow(n_instruments, n_cashflows, repeats, allocations_bytes, seconds_per_instrument, seconds_total, baseline_allocations_bytes, baseline_seconds_per_instrument)
+
+One row of a benchmark report: the portfolio size, the number of
+cash flows priced, the repeat count, the bytes allocated by one
+batched pricing pass (after warmup), the median seconds per
+instrument over the repeats, the median total seconds, and the same
+two figures for the baseline loop that prices each instrument
+separately through the valuation context.
+"""
+struct BenchmarkRow
+    n_instruments::Int
+    n_cashflows::Int
+    repeats::Int
+    allocations_bytes::Int
+    seconds_per_instrument::Float64
+    seconds_total::Float64
+    baseline_allocations_bytes::Int
+    baseline_seconds_per_instrument::Float64
+end
+
+"""
+    BenchmarkReport(julia_version, nthreads, blas_threads, blas_config, rows)
+
+A benchmark report: the Julia version, thread count and BLAS
+configuration the numbers were measured under, plus one
+`BenchmarkRow` per portfolio size. Times are wall-clock medians
+over the repeats; allocations are bytes allocated by one pricing
+pass after warmup.
+"""
+struct BenchmarkReport
+    julia_version::VersionNumber
+    nthreads::Int
+    blas_threads::Int
+    blas_config::String
+    rows::Vector{BenchmarkRow}
+end
+
+# Median of a vector of timings, computed without a Statistics
+# dependency: the benchmark runner only needs this one summary.
+function _benchmark_median(xs::Vector{Float64})
+    s = sort(xs)
+    n = length(s)
+    return isodd(n) ? s[(n + 1) ÷ 2] : (s[n ÷ 2] + s[n ÷ 2 + 1]) / 2
+end
+
+# The baseline loop: price each instrument separately through the
+# valuation context, which rebuilds its schedule and recomputes its
+# year fractions on every call. Kept as its own function so its
+# allocations are measured exactly, without closure overhead.
+function _baseline_price_total(ctx::ValuationContext{ZeroCurve},
+                               terms::Vector{SukukTerms})
+    total = 0.0
+    for t in terms
+        total += price(ctx, t)
+    end
+    return total
+end
+
+"""
+    benchmark_pricing(portfolios, settlement, curve; repeats=5)
+
+Run the benchmark suite: for each portfolio in `portfolios` (one
+vector of terms per size), warm up, then time `repeats` batched
+pricing passes and the same number of baseline per-instrument
+pricing loops, recording allocations and median seconds per
+instrument for both. The setup (schedule preparation) is excluded
+from the timed passes. Returns a `BenchmarkReport` carrying the
+Julia version, thread count and BLAS configuration alongside the
+rows. Timing is wall clock on the machine that runs it: compare
+rows measured in the same run, not numbers from different machines.
+"""
+function benchmark_pricing(portfolios::Vector{Vector{SukukTerms}},
+                           settlement::Date, curve::ZeroCurve;
+                           repeats::Int=5)
+    repeats < 1 && throw(ArgumentError("repeats must be a positive integer"))
+    isempty(portfolios) && throw(ArgumentError("portfolios must not be empty"))
+    ctx = ValuationContext(settlement, curve)
+    rows = BenchmarkRow[]
+    for terms in portfolios
+        batch = prepare_batch(terms, settlement, curve)
+        price_batch!(batch, curve)
+        allocs = @allocated price_batch!(batch, curve)
+        times = Float64[]
+        for _ in 1:repeats
+            t0 = time_ns()
+            price_batch!(batch, curve)
+            push!(times, (time_ns() - t0) / 1e9)
+        end
+        seconds_total = _benchmark_median(times)
+        _baseline_price_total(ctx, terms)
+        base_allocs = @allocated _baseline_price_total(ctx, terms)
+        base_times = Float64[]
+        for _ in 1:repeats
+            t0 = time_ns()
+            _baseline_price_total(ctx, terms)
+            push!(base_times, (time_ns() - t0) / 1e9)
+        end
+        n = length(terms)
+        push!(rows, BenchmarkRow(n, length(batch.times), repeats,
+                                 allocs, seconds_total / n, seconds_total,
+                                 base_allocs,
+                                 _benchmark_median(base_times) / n))
+    end
+    return BenchmarkReport(VERSION, Base.Threads.nthreads(),
+                           BLAS.get_num_threads(),
+                           string(BLAS.get_config()), rows)
+end
+
+"""
+    benchmark_table(report)
+
+Render a `BenchmarkReport` as plain text: the environment line
+(Julia version, threads, BLAS configuration) followed by one line
+per portfolio size with allocations and seconds per instrument for
+the batched pass and for the baseline loop.
+"""
+function benchmark_table(report::BenchmarkReport)
+    lines = String[
+        "Benchmark (Julia $(report.julia_version), " *
+        "threads $(report.nthreads), BLAS $(report.blas_threads) " *
+        "threads, $(report.blas_config)):",
+        "instruments  cash flows  repeats  alloc bytes  " *
+        "us/instrument  baseline us/instrument",
+    ]
+    for row in report.rows
+        us = round(1e6 * row.seconds_per_instrument; digits=2)
+        base_us = round(1e6 * row.baseline_seconds_per_instrument;
+                        digits=2)
+        push!(lines, "$(row.n_instruments)  $(row.n_cashflows)  " *
+                     "$(row.repeats)  $(row.allocations_bytes)  " *
+                     "$us  $base_us")
+    end
+    return join(lines, "\n")
 end

@@ -7,6 +7,16 @@
 #   examples/results.json                  (canonical results file)
 #   test/fixtures/valuation_parity.json    (shared Julia/Python fixtures)
 #
+# results.json is the one versioned schema (sukuklab/results/1) both
+# renderers consume: examples/make_dashboard.jl renders its snapshot
+# from it, and examples/make_dashboard.py renders the portfolio
+# dashboard from it. The schema records its version, the Julia
+# version that generated it, and the source dates of the IILM record,
+# so a renderer can refuse an unknown schema instead of rendering
+# stale numbers, and a reader can tell when the inputs were published
+# and retrieved. New analytics belong here first; renderers must not
+# recompute them inline.
+#
 # Inputs are the documented public ones, identical to examples/demo.jl:
 # the IILM January 2026 auction clearing rates archived in
 # data/iilm_2026-01.json, the UAE retail T-Sukuk published terms, and
@@ -84,9 +94,57 @@ pc = SukukTerms("Illustrative 7y 5.25% murabaha", 1000.0, 0.0525,
 holdings = [mk_holding(pa, 990.0, 50, settle), mk_holding(pb, 1010.0, 30, settle),
             mk_holding(pc, 1000.0, 20, settle)]
 
+# ---------------------------------------------------------------------------
+# 4. Playground pricing and structures (dashboard sections 1-2), and the
+# UAE price sweep (the dashboard price chart payload). The dashboard
+# snapshot used to recompute these inline; it now renders them from
+# this export, so the values cannot drift from the package.
+# ---------------------------------------------------------------------------
+
+play_terms = SukukTerms("Playground sukuk", 1000.0, 0.0506,
+                        Date(2026, 1, 15), Date(2026, 1, 15) + Year(5),
+                        2, "ijara")
+play_anchor = Date(2026, 1, 15)
+play_cfs = payment_schedule(play_terms)
+play_y = 0.0506
+play_p = price_from_cashflows(play_cfs, play_y, play_anchor; m=2)
+
+struct_issue = Date(2026, 1, 15)
+struct_maturity = Date(2029, 1, 15)
+function structure_schedule(structure, amortizing)
+    terms = SukukTerms("$structure example", 1000.0, 0.05,
+                       struct_issue, struct_maturity, 2, structure;
+                       amortizing=amortizing)
+    return payment_schedule(terms)
+end
+ijara_cfs = structure_schedule("ijara", false)
+murabaha_cfs = structure_schedule("murabaha", true)
+wakala_cfs = structure_schedule("wakala", false)
+
+# Sweep over the same remaining cash flows the shared valuation
+# fixture carries, so the Python checker can recompute it from the
+# fixture alone. Yields are in percent, matching the chart axis.
+sweep_yields = [2.0 + i / 10 for i in 0:70]
+sweep_cfs = remaining_cashflows(uae_cfs, settle)
+sweep_prices = [price_from_cashflows(sweep_cfs, y / 100, settle; m=2)
+                for y in sweep_yields]
+
 results = Pair{String,Any}[
     "generated_by" => "examples/make_results.jl",
     "calculation_path" => "SukukLab Julia package only",
+    "schema" => "sukuklab/results/1",
+    "schema_version" => 1,
+    # Major.minor of the generating Julia: stable across patch
+    # releases, so the file only changes when the pinned Julia
+    # version moves. CI pins that version (see .github/workflows/ci.yml).
+    "julia_version" => string(VERSION.major) * "." * string(VERSION.minor),
+    # Source dates, taken from the record itself: the auction date,
+    # and the published and retrieved dates of its three sources.
+    "iilm_source_published_dates" => [string(s.published)
+                                       for s in record.sources
+                                       if s.published !== nothing],
+    "iilm_source_retrieved_dates" => [string(s.retrieved)
+                                       for s in record.sources],
     "iilm_anchor" => string(anchor),
     "iilm_auction_date" => string(record.auction_date),
     "iilm_series" => [i.series for i in record.instruments],
@@ -112,6 +170,36 @@ results = Pair{String,Any}[
     "portfolio_weighted_ytm" => weighted_ytm(holdings),
     "portfolio_weighted_duration" => weighted_duration(holdings),
     "portfolio_weighted_convexity" => weighted_convexity(holdings),
+    "playground_face" => play_terms.face,
+    "playground_profit_rate" => play_terms.profit_rate,
+    "playground_issue" => string(play_terms.issue),
+    "playground_maturity" => string(play_terms.maturity),
+    "playground_freq" => play_terms.freq,
+    "playground_structure" => play_terms.structure,
+    "playground_anchor" => string(play_anchor),
+    # At the anchor (the issue date) accrued profit is zero, so the
+    # full price and the clean price coincide; the dashboard labels
+    # this value its clean price.
+    "playground_clean_price" => play_p,
+    "playground_n_cashflows" => length(play_cfs),
+    "playground_ytm" => ytm_from_price(play_cfs, play_p, play_anchor; m=2),
+    "playground_macaulay_duration" => macaulay_duration(play_cfs, play_y, play_anchor; m=2),
+    "playground_modified_duration" => modified_duration(play_cfs, play_y, play_anchor; m=2),
+    "playground_convexity" => convexity(play_cfs, play_y, play_anchor; m=2),
+    "playground_dv01" => dv01(play_cfs, play_y, play_anchor; m=2),
+    "structure_face" => 1000.0,
+    "structure_profit_rate" => 0.05,
+    "structure_issue" => string(struct_issue),
+    "structure_maturity" => string(struct_maturity),
+    "structure_freq" => 2,
+    "structure_ijara_dates" => [string(cf.date) for cf in ijara_cfs],
+    "structure_ijara_amounts" => [cf.amount for cf in ijara_cfs],
+    "structure_murabaha_dates" => [string(cf.date) for cf in murabaha_cfs],
+    "structure_murabaha_amounts" => [cf.amount for cf in murabaha_cfs],
+    "structure_wakala_dates" => [string(cf.date) for cf in wakala_cfs],
+    "structure_wakala_amounts" => [cf.amount for cf in wakala_cfs],
+    "uae_price_sweep_yield_pct" => sweep_yields,
+    "uae_price_sweep_prices" => sweep_prices,
 ]
 write_json(joinpath(ROOT, "examples", "results.json"), results)
 println("wrote examples/results.json")

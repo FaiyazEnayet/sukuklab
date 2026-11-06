@@ -138,12 +138,46 @@ def main():
             mine = ytm_from_price(cfs, chk["price"], anchor, m)
             check(f"{name} ytm at price {chk['price']}", mine, chk["ytm"])
 
+    # Chart payload: the Julia-exported UAE price sweep in
+    # examples/results.json must match an independent Python
+    # recomputation from the shared uae_bullet fixture, within the
+    # same 1e-8 per 1,000 face bar. This is the cross-renderer
+    # equality check for SU7: the Python dashboard renders the
+    # sweep from the schema, it does not compute its own.
+    results_path = Path(__file__).parent.parent / "examples" / "results.json"
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+    if results.get("schema") != "sukuklab/results/1" or results.get("schema_version") != 1:
+        failures.append("results.json schema is not sukuklab/results/1")
+    else:
+        yields = results.get("uae_price_sweep_yield_pct")
+        prices = results.get("uae_price_sweep_prices")
+        if yields is None or prices is None:
+            failures.append("results.json has no exported UAE price sweep")
+        elif len(yields) != 71 or len(prices) != 71:
+            failures.append(
+                f"price sweep length {len(yields)} x {len(prices)}, expected 71 x 71"
+            )
+        else:
+            uae = data["cases"]["uae_bullet"]
+            sweep_anchor = parse(uae["anchor"])
+            sweep_cfs = [(parse(d), a) for d, a in uae["cashflows"]]
+            for i, (y_pct, p) in enumerate(zip(yields, prices)):
+                if abs(y_pct - (2.0 + i / 10)) > 1e-12:
+                    failures.append(
+                        f"price sweep yield {i}: {y_pct!r} != {2.0 + i / 10!r}"
+                    )
+                check(
+                    f"uae price sweep at {y_pct}%",
+                    price_from_cashflows(sweep_cfs, y_pct / 100, sweep_anchor, uae["m"]),
+                    p,
+                )
+
     if failures:
         print("PARITY FAIL")
         for f in failures:
             print(" -", f)
         return 1
-    print(f"PARITY OK: {len(data['cases'])} cases within {TOL:.0e} "
+    print(f"PARITY OK: {len(data['cases'])} cases + 71 sweep points within {TOL:.0e} "
           "per 1,000 face")
     return 0
 

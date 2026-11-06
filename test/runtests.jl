@@ -984,4 +984,6 @@ using Dates
                        :thirty_360) == 1.0
     end
 
+    include("stage3_su7.jl")
+
 end

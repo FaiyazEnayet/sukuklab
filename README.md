@@ -87,21 +87,22 @@ I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5
 
 The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
 
-The full suite is 317 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, anchor-generated month-end and leap-day schedules with explicit stub periods, the bond-basis 30/360 reference values (including a February-end to February-end span across a leap day), a seven-month semiannual instrument whose one-month final stub pays its 30/360 fraction, full/accrued/clean price decomposition and clean-price yield roundtrips, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, curve pillar and quote validation with calibration diagnostics (flat, non-flat, between-pillar, steep and infeasible quote sets repriced against independently computed prices), the published-terms IILM reconstruction fixture with its loader validation, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
+The full suite is 368 tests, all passing: pricing and yield roundtrips, schedule shapes and day counts, anchor-generated month-end and leap-day schedules with explicit stub periods, the bond-basis 30/360 reference values (including a February-end to February-end span across a leap day), a seven-month semiannual instrument whose one-month final stub pays its 30/360 fraction, full/accrued/clean price decomposition and clean-price yield roundtrips, curve interpolation and bootstrap recovery on a synthetic flat curve, bootstrap on the real IILM auction, curve pillar and quote validation with calibration diagnostics (flat, non-flat, between-pillar, steep and infeasible quote sets repriced against independently computed prices), the published-terms IILM reconstruction fixture with its loader validation, duration against finite differences, convexity sign, DV01 against a 1bp reprice, and portfolio weighting. The suite also guards the scope of the library itself: every source file under `src/` must be included by the package entry point, the package version must match the latest CHANGELOG release heading, and the canonical results file must match a fresh recomputation.
 
 ## Reproducing the results
 
-From a clean checkout, with Julia 1.10 or newer:
+From a clean checkout, with Julia 1.13 (the version pinned in CI and recorded in `examples/results.json`; the package declares compatibility with Julia 1.10 and newer):
 
 ```bash
 julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.test()'
 julia --project=. examples/demo.jl
 julia --project=. examples/make_results.jl
+julia --project=. examples/make_dashboard.jl
 julia --project=. examples/make_iilm_residuals.jl
 python3 test/check_parity.py
 ```
 
-The demo recomputes every number in Measured results from the archived inputs. `make_results.jl` regenerates the canonical results file (`examples/results.json`) and the shared valuation fixtures (`test/fixtures/valuation_parity.json`) from the package alone; CI fails if the checked-in files differ from a fresh regeneration. `make_iilm_residuals.jl` regenerates the IILM pricing-residual report (`examples/iilm_residuals.json` and `examples/iilm_residuals.csv`): each series' model price under the documented convention against its curve repricing, recorded with the SHA-256 of the source data file. `check_parity.py` is a standard-library-only Python implementation of the same documented pricing formulas, and verifies that Julia and Python valuations agree to within 1e-8 per 1,000 face on the shared fixtures.
+The demo recomputes every number in Measured results from the archived inputs. `make_results.jl` regenerates the canonical results file (`examples/results.json`) and the shared valuation fixtures (`test/fixtures/valuation_parity.json`) from the package alone; CI fails if the checked-in files differ from a fresh regeneration. `make_dashboard.jl` renders the playground snapshot from the canonical results file and then runs the Python presentation step that produces `docs/dashboard.html`. `make_iilm_residuals.jl` regenerates the IILM pricing-residual report (`examples/iilm_residuals.json` and `examples/iilm_residuals.csv`): each series' model price under the documented convention against its curve repricing, recorded with the SHA-256 of the source data file. `check_parity.py` is a standard-library-only Python implementation of the same documented pricing formulas, and verifies that Julia and Python valuations agree to within 1e-8 per 1,000 face on the shared fixtures.
 
 ## Real data
 

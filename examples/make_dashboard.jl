@@ -1,19 +1,61 @@
-# make_dashboard.jl — static HTML snapshot of notebook.jl for docs/dashboard.html.
+# make_dashboard.jl - static HTML snapshot of notebook.jl for docs/dashboard.html.
 #
 # Pluto's own HTML export needs a running Pluto server, which this build
 # environment cannot provide, so this script renders the same three sections
-# directly: every number is computed live from SukukLab, and the zero-curve
-# plot is inline SVG. The result is self-contained (no external resources)
-# and ready to serve from docs/ via GitHub Pages.
+# directly: every number is read from the canonical results schema, and the
+# zero-curve plot is inline SVG. The result is self-contained (no external
+# resources) and ready to serve from docs/ via GitHub Pages.
+#
+# The schema is examples/results.json, exported by
+# examples/make_results.jl from the SukukLab package. Regenerate it first
+# after changing any analytics, then run this script. The schema is
+# versioned (sukuklab/results/1); an unknown version stops the run
+# instead of rendering stale numbers. The Python presentation path
+# (examples/make_dashboard.py, run at the end of this script) renders
+# the portfolio dashboard from the same schema file, so the two
+# renderers cannot drift apart.
 #
 # Run from the repo root:
 #   ~/.juliaup/bin/julia --project=. examples/make_dashboard.jl
 
-using SukukLab
-using Dates
-
 r2(x) = round(x; digits=2)
 r4(x) = round(x; digits=4)
+
+# Minimal reader for the flat results schema: one "key": value pair per
+# line, values are strings, numbers, or flat arrays of either. It reads
+# the checked-in schema file; it is not a general JSON parser and must
+# stay in step with examples/make_results.jl.
+function read_results(path)
+    data = Dict{String,Any}()
+    for line in eachline(path)
+        m = match(r"^  \"([^\"]+)\": (.*)$", line)
+        m === nothing && continue
+        key, raw = m.captures[1], m.captures[2]
+        raw = endswith(raw, ",") ? raw[1:(end - 1)] : raw
+        if startswith(raw, "\"")
+            data[key] = raw[2:(end - 1)]
+        elseif startswith(raw, "[")
+            inner = strip(raw[2:(end - 1)])
+            if isempty(inner)
+                data[key] = Any[]
+            elseif startswith(inner, "\"")
+                data[key] = [s.captures[1] for s in
+                             eachmatch(r"\"([^\"]*)\"", inner)]
+            else
+                data[key] = parse.(Float64, split(inner, ", "))
+            end
+        else
+            data[key] = parse(Float64, raw)
+        end
+    end
+    return data
+end
+
+results = read_results(joinpath(@__DIR__, "results.json"))
+if get(results, "schema", "") != "sukuklab/results/1" ||
+        get(results, "schema_version", 0) != 1
+    error("unsupported results schema: expected sukuklab/results/1")
+end
 
 function html_table(headers, rows)
     h = join(["<th>$(c)</th>" for c in headers], "")
@@ -23,51 +65,51 @@ function html_table(headers, rows)
 end
 
 # ------------------------------------------------ section 1: pricing ------
-terms1 = SukukTerms("Playground sukuk", 1000.0, 0.0506,
-                    Date(2026, 1, 15), Date(2026, 1, 15) + Year(5), 2, "ijara")
-anchor1 = Date(2026, 1, 15)
-cfs1 = payment_schedule(terms1)
-y1 = 0.0506
-p1 = price_from_cashflows(cfs1, y1, anchor1; m=2)
-ytm1 = ytm_from_price(cfs1, p1, anchor1; m=2)
-sec1 = html_table(["Measure", "Value (profit 5.06%, yield 5.06%, 5y, face 1000)"],
-    [["Clean price", r2(p1)],
-     ["Cash flows", length(cfs1)],
-     ["Yield to maturity", "$(r4(100ytm1))%"],
-     ["Macaulay duration", "$(r4(macaulay_duration(cfs1, y1, anchor1; m=2))) years"],
-     ["Modified duration", r4(modified_duration(cfs1, y1, anchor1; m=2))],
-     ["Convexity", r4(convexity(cfs1, y1, anchor1; m=2))],
-     ["DV01", r4(dv01(cfs1, y1, anchor1; m=2))]])
+# Every value comes from the schema; the header is built from the same
+# recorded terms, so the label cannot drift from the numbers.
+sec1 = html_table(["Measure", "Value (profit $(r2(100 * results["playground_profit_rate"]))%, yield $(r2(100 * results["playground_ytm"]))%, 5y, face $(round(Int, results["playground_face"])))"],
+    [["Clean price", r2(results["playground_clean_price"])],
+     ["Cash flows", round(Int, results["playground_n_cashflows"])],
+     ["Yield to maturity", "$(r4(100 * results["playground_ytm"]))%"],
+     ["Macaulay duration", "$(r4(results["playground_macaulay_duration"])) years"],
+     ["Modified duration", r4(results["playground_modified_duration"])],
+     ["Convexity", r4(results["playground_convexity"])],
+     ["DV01", r4(results["playground_dv01"])]])
 
 # ------------------------------------------------ section 2: structures ----
-function schedule_table(structure, amortizing)
-    t = SukukTerms("$structure example", 1000.0, 0.05,
-                   Date(2026, 1, 15), Date(2029, 1, 15), 2, structure;
-                   amortizing=amortizing)
-    cfs = payment_schedule(t)
-    rows = [["$(cf.date)", r2(cf.amount)] for cf in cfs]
+function schedule_table(structure)
+    dates = results["structure_$(structure)_dates"]
+    amounts = results["structure_$(structure)_amounts"]
+    rows = [["$(d)", r2(a)] for (d, a) in zip(dates, amounts)]
     return html_table(["Date", "Amount"],
-        vcat(rows, [["Total", r2(sum(cf.amount for cf in cfs))]]))
+        vcat(rows, [["Total", r2(sum(amounts))]]))
 end
-sec2_ijara = schedule_table("ijara", false)
-sec2_murabaha = schedule_table("murabaha", true)
-sec2_wakala = schedule_table("wakala", false)
+sec2_ijara = schedule_table("ijara")
+sec2_murabaha = schedule_table("murabaha")
+sec2_wakala = schedule_table("wakala")
 
 # ------------------------------------------------ section 3: curve ---------
-# Load the real IILM auction record through the package's validated
-# loader: actual issue and maturity dates, not month arithmetic.
-record = load_auction_record(joinpath(@__DIR__, "..", "data",
-                                      "iilm_2026-01.json"))
-canchor = auction_anchor(record)
-instruments = auction_instruments(record)
-curve = bootstrap(instruments, canchor)
-fwd = forward_rate(curve, 0.5, 1.0)
+pillars = results["pillar_years"]
+zeros = results["zero_rates"]
+fwd = results["forward_6m_12m"]
 sec3 = html_table(["Pillar", "Zero rate"],
-    [["$(r4(t))y", "$(r4(100z))%"] for (t, z) in zip(curve.pillars, curve.zeros)])
+    [["$(r4(t))y", "$(r4(100z))%"] for (t, z) in zip(pillars, zeros)])
+
+# Presentation smoothing for the curve plot: linear interpolation
+# between the schema pillars, flat outside them, mirroring the
+# package curve convention. The plotted pillar dots are the schema
+# values themselves.
+function interp_zero(t)
+    t <= pillars[1] && return zeros[1]
+    t >= pillars[end] && return zeros[end]
+    i = searchsortedlast(pillars, t)
+    w = (t - pillars[i]) / (pillars[i + 1] - pillars[i])
+    return zeros[i] * (1 - w) + zeros[i + 1] * w
+end
 
 # inline SVG zero-curve plot
 ts = collect(range(0.03, 1.0; length=80))
-zs = [100 * zero_rate(curve, t) for t in ts]
+zs = [100 * interp_zero(t) for t in ts]
 zmin, zmax = minimum(zs), maximum(zs)
 pad = max(0.05, 0.15 * (zmax - zmin))
 zlo, zhi = zmin - pad, zmax + pad
@@ -78,7 +120,7 @@ Y(z) = mt + (1 - (z - zlo) / (zhi - zlo)) * (H - mt - mb)
 pts = join(["$(round(X(t); digits=1)),$(round(Y(z); digits=1))"
             for (t, z) in zip(ts, zs)], " ")
 dots = join(["<circle cx=\"$(round(X(t); digits=1))\" cy=\"$(round(Y(100z); digits=1))\" r=\"4\" fill=\"#1f6feb\"/>"
-             for (t, z) in zip(curve.pillars, curve.zeros)], "\n")
+             for (t, z) in zip(pillars, zeros)], "\n")
 svg = """
 <svg width="$W" height="$H" style="background:white;border:1px solid #ddd;border-radius:8px" xmlns="http://www.w3.org/2000/svg">
   <text x="$ml" y="15" font-size="13" fill="#333">Zero curve, continuously compounded %</text>

@@ -43,6 +43,7 @@ def main():
     data_path = "data/iilm_2026-01.json"
     auction = load(data_path)
     results = load("examples/results.json")
+    require(results.get("schema") == "sukuklab/results/1" and results.get("schema_version") == 1, "Unsupported results schema")
     residual = load("examples/iilm_residuals.json")
     fixture = load("test/fixtures/valuation_parity.json")["cases"]["uae_bullet"]
     digest = hashlib.sha256((ROOT / data_path).read_bytes()).hexdigest()
@@ -85,7 +86,10 @@ def main():
     require(math.isclose(price(ytm), full, abs_tol=1e-8), "Baseline full price mismatch")
     require(math.isclose(price(ytm+.01), results["uae_price_shift_100bp"], abs_tol=1e-8), "Shifted full price mismatch")
     points = list(zip(results["pillar_years"], [z*100 for z in results["zero_rates"]]))
-    sweep = [(2+i/10, price((2+i/10)/100)) for i in range(71)]
+    # The price chart renders the sweep Julia exported into the
+    # schema; it does not compute its own. test/check_parity.py
+    # independently recomputes the sweep from the shared fixture.
+    sweep = list(zip(results["uae_price_sweep_yield_pct"], results["uae_price_sweep_prices"]))
     lo = math.floor(min(p for _, p in sweep)/50)*50
     hi = math.ceil(max(p for _, p in sweep)/50)*50
 

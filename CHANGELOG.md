@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- One versioned results schema (`sukuklab/results/1` in `examples/results.json`): Julia is now the single analytics authority for both renderers. `examples/make_results.jl` exports the playground pricing, the three cash-flow structures, and the UAE price sweep alongside the existing curve and valuation values, and records the generating Julia version (1.13) and the IILM source dates (auction 2026-01-13; sources published 2026-01-13 and 2026-03-05, all retrieved 2026-11-02). `examples/make_dashboard.jl` renders its snapshot from the schema instead of recomputing analytics inline, and `examples/make_dashboard.py` renders the price chart from the exported sweep instead of computing its own. A new regression test recomputes every schema value live from the package, and the Python parity checker independently recomputes the sweep from the shared fixture; chart payloads agree within 1e-8 per 1,000 face. CI pins Julia 1.13 and runs the dashboard generator.
+
+### Added
 - Golden fixtures pinning the schedule and day-count conventions to hand-computed values: a seven-month semiannual instrument (one regular period plus a one-month final stub paying its 30/360 fraction of 5 per 1,000 face, with accrued profit inside the stub accruing the stub distribution), and February-end to February-end 30/360 spans (2024-02-29 to 2025-02-28 is exactly one year under the bond-basis rules). The remaining acceptance clauses (month-end and leap-day schedules, duplicate pillar rejection, stub fractions) were audited against the existing fixtures and already hold.
 
 ### Added

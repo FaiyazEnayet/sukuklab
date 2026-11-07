@@ -1199,4 +1199,6 @@ using LinearAlgebra
 
     include("stage3_su4.jl")
 
+    include("stage3_su5.jl")
+
 end

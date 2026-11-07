@@ -34,6 +34,8 @@ export sukuk_price, sukuk_ytm,
     macaulay_duration, modified_duration, convexity, dv01,
     price_under_shift,
     Holding, portfolio_value, weighted_ytm, weighted_duration,
-    weighted_convexity
+    weighted_convexity,
+    HazardOverlay, CurveTwist, twist_curve, stressed_price,
+    StressScenario, StressResult, PortfolioStress, stress_scenario
 
 end

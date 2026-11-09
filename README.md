@@ -68,7 +68,7 @@ flowchart LR
 | `src/analytics.jl` | Yield to maturity, full/accrued/clean price decomposition, current yield, Macaulay and modified duration, convexity, DV01, parallel shift repricing. |
 | `src/portfolio.jl` | Market-value-weighted yield, duration and convexity across holdings. |
 
-Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk pays lease-based periodic distributions with principal at maturity. A murabaha sukuk reflects a deferred sale: cost plus agreed profit, paid as a bullet or in installments. A wakala sukuk pays distributions from an agency-managed pool. The library models the cash-flow shapes that follow from each structure. Nothing more.
+Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk pays lease-based periodic distributions with principal at maturity. A murabaha sukuk reflects a deferred sale: cost plus agreed profit, paid as a bullet or in installments. A wakala sukuk pays distributions from an agency-managed pool. The library models the cash-flow shapes that follow from each structure, keeping each structure tied directly to the cash flows it creates.
 
 ## Measured results
 
@@ -85,7 +85,7 @@ Real published data from a bootstrapped short end zero curve: the IILM short-ter
 
 The 6m to 12m forward rate is 2.9987%. The published 12m clearing rate sat below the 6m rate, and the curve keeps that shape.
 
-I ran the analytics on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued at settlement 2026-10-10, ten days after the 2026-09-30 distribution: the full price is 1000 on 1000 face, of which 1.41 is profit accrued since that distribution, so the clean price is 998.59. YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices the full price to 957.66.
+The analytics run on real published terms: the UAE sovereign retail T-Sukuk, 5-year, 5.06% annual, semi-annual, maturing 2031-09-30. Valued at settlement 2026-10-10, ten days after the 2026-09-30 distribution: the full price is 1000 on 1000 face, of which 1.41 is profit accrued since that distribution, so the clean price is 998.59. YTM 5.089%, Macaulay duration 4.4541y, modified duration 4.3436y, convexity 22.3272, DV01 0.4344 per 1000 face. A 100bp parallel rise reprices the full price to 957.66.
 
 The portfolio demo uses three illustrative holdings and is labeled synthetic in the script: value 99,800, weighted YTM 5.8005%, weighted duration 2.762y, weighted convexity 10.5031.
 
@@ -108,12 +108,12 @@ The demo recomputes every number in Measured results from the archived inputs. `
 
 ## Real data
 
-Two public sources feed the demo. The IILM record in `data/iilm_2026-01.json` reconstructs the January 2026 auction from its published series terms: series and ISIN identifiers, amounts, clearing profit rates, and the actual issue (2026-01-15) and maturity dates, taken from the IILM press release and auction results table and the Fitch Ratings Japan register, with the auction date (2026-01-13) stored separately as the observation time and the verbatim press-release quote kept for each series. A validated loader in the package reads that record; the demo, the notebook, the dashboard builder and the results generator all consume it instead of deriving dates from tenor labels. I treat the published rates as simple annualized discount rates (Actual/365); that is a documented modeling choice, not a quoted convention, and no clearing prices are recorded, because none are published with the rates. The UAE retail sukuk terms (5.06%, semi-annual, 2031-09-30 maturity) come from Nasdaq Dubai listing reports. Everything else in the demo is synthetic and labeled so.
+Two public sources feed the demo. The IILM record in `data/iilm_2026-01.json` reconstructs the January 2026 auction from its published series terms: series and ISIN identifiers, amounts, clearing profit rates, and the actual issue (2026-01-15) and maturity dates, taken from the IILM press release and auction results table and the Fitch Ratings Japan register, with the auction date (2026-01-13) stored separately as the observation time and the verbatim press-release quote kept for each series. A validated loader in the package reads that record; the demo, the notebook, the dashboard builder and the results generator all consume it instead of deriving dates from tenor labels. The package treats the published rates as simple annualized discount rates (Actual/365), a documented modeling choice stated separately from any quoted convention; no clearing prices are recorded, because none are published with the rates. The UAE retail sukuk terms (5.06%, semi-annual, 2031-09-30 maturity) come from Nasdaq Dubai listing reports. Everything else in the demo is synthetic and labeled so, keeping the published cases distinct and ready to extend with new sources.
 
 ## References
 
 IILM short-term sukuk auction results, January 2026. Nasdaq Dubai sukuk listing announcements. Standard fixed-income texts for duration and convexity arithmetic.
 
-## Honest limitations
+## Scope and conventions
 
-The IILM curve covers only the short end: four dated instruments from one auction. It is a primary-market observation, not a live secondary curve. Different credits sit at different levels, so do not mix these pillars with other issuers' paper. The UAE example uses published issuance terms; I have no secondary prices for it, so its risk numbers are computed at par. Day-count and compounding conventions are documented choices; check them against your market before relying on them. The dashboard explores the recorded curve and reprices the UAE example by yield; Pluto includes the broader instrument controls. This is analytics code, not investment advice.
+The IILM curve covers the short end with four dated instruments from one auction, as a primary-market observation distinct from a live secondary curve. Different credits sit at different levels, so these pillars apply to this auction and stay separate from other issuers' paper. The UAE example uses published issuance terms, with its risk numbers computed at par, ready to update when secondary prices are added. Day-count and compounding conventions are documented choices, ready to check against a given market. The dashboard explores the recorded curve and reprices the UAE example by yield; Pluto includes the broader instrument controls. This is analytics code, not investment advice.

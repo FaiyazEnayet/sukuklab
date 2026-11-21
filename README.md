@@ -74,6 +74,8 @@ Ijara, murabaha and wakala are named here as financial mechanics. An ijara sukuk
 
 Every number here is computed by the package from the archived inputs and recorded in the canonical results file `examples/results.json`; the test suite recomputes them and checks the quoted values against it.
 
+One file carries all of it. The canonical results file follows the versioned schema `sukuklab/results/1` and is computed by the Julia package alone, so Julia is the single analytics authority for both renderers: the dashboard snapshot and the price chart are rendered from its exported values rather than recomputed. Alongside the curve and valuation values it exports the playground pricing, the three cash-flow structures (ijara, murabaha and wakala schedules), and the UAE price sweep, and it records the generating Julia version (1.13) and the IILM source dates.
+
 Real published data from a bootstrapped short end zero curve: the IILM short-term sukuk auction of January 2026, clearing at 3.81% (1m), 3.84% (3m), 3.82% (6m) and 3.45% (12m). The four series were issued on 2026-01-15 and mature on their actual published dates, so the curve anchors on the issue date and each pillar sits at its real time to maturity. The curve recovers every auction point exactly, as a bootstrap should:
 
 | Pillar | Zero rate |

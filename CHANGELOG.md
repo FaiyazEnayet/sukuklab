@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs
+- README Measured results now names the versioned results schema (`sukuklab/results/1`): the canonical results file is computed by the Julia package alone, and the dashboard snapshot and the price chart render from its exported playground pricing, three cash-flow structures and UAE price sweep.
+
 ## v1.2.0 - 2026-11-20
 
 ### Added

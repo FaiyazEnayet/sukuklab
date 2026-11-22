@@ -11,6 +11,7 @@ include("sukuk.jl")
 include("cashflows.jl")
 include("curve.jl")
 include("marketdata.jl")
+include("quote_risk.jl")
 include("analytics.jl")
 include("portfolio.jl")
 
@@ -25,6 +26,9 @@ export sukuk_price, sukuk_ytm,
     AuctionSource, AuctionInstrument, AuctionRecord, load_auction_record,
     model_price, auction_anchor, auction_instruments, auction_curve,
     pricing_residuals,
+    QuoteInput, quote_price, quote_price_derivative, auction_quotes,
+    pv_at_zeros, residual_jacobian, implicit_quote_sensitivities,
+    quote_risk,
     PriceDecomposition, price_decomposition, ytm_from_clean_price,
     price_from_cashflows, ytm_from_price, current_yield,
     NominalYield, ValuationContext, price, price_from_curve,

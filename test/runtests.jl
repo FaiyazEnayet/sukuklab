@@ -1201,4 +1201,6 @@ using LinearAlgebra
 
     include("stage3_su5.jl")
 
+    include("stage3_p1_7.jl")
+
 end

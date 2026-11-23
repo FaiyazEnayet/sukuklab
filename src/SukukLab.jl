@@ -13,6 +13,7 @@ include("curve.jl")
 include("marketdata.jl")
 include("quote_risk.jl")
 include("analytics.jl")
+include("curve_risk.jl")
 include("portfolio.jl")
 
 export sukuk_price, sukuk_ytm,
@@ -29,6 +30,7 @@ export sukuk_price, sukuk_ytm,
     QuoteInput, quote_price, quote_price_derivative, auction_quotes,
     pv_at_zeros, residual_jacobian, implicit_quote_sensitivities,
     quote_risk,
+    node_sensitivities, node_dv01, curve_risk, curve_risk_positions,
     PriceDecomposition, price_decomposition, ytm_from_clean_price,
     price_from_cashflows, ytm_from_price, current_yield,
     NominalYield, ValuationContext, price, price_from_curve,

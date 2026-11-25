@@ -33,7 +33,15 @@ using LinearAlgebra
         @test isapprox(sukuk_ytm(100.0, 100.0, 0.05, 5.0), 0.05; atol=1e-8)
         # Impossible prices return NaN, not garbage.
         @test isnan(sukuk_ytm(-5.0, 100.0, 0.05, 5.0))
-        @test isnan(sukuk_ytm(1e9, 100.0, 0.05, 5.0))
+        # A very large price still has a root: for positive cash
+        # flows the price runs to infinity as the yield approaches
+        # -m from above, so a price of 1e9 sits at a yield below
+        # the old hard-coded bracket edge (-0.99) and is solved,
+        # not reported missing.
+        y_deep = sukuk_ytm(1e9, 100.0, 0.05, 5.0)
+        @test -2.0 < y_deep < -0.99
+        @test isapprox(sukuk_price(100.0, 0.05, y_deep, 5.0), 1e9;
+                       rtol=1e-9)
     end
 
     @testset "cashflows" begin
@@ -418,7 +426,13 @@ using LinearAlgebra
             @test isapprox(ytm_from_price(cfs, p, anchor), y; atol=1e-8)
         end
         @test isnan(ytm_from_price(cfs, -10.0, anchor))
-        @test isnan(ytm_from_price(cfs, 1e12, anchor))
+        # A very large price still has a root, below the old
+        # hard-coded bracket edge, and is solved rather than
+        # reported missing (see the sukuk_ytm testset).
+        y_deep = ytm_from_price(cfs, 1e12, anchor)
+        @test -2.0 < y_deep < -0.99
+        @test isapprox(price_from_cashflows(cfs, y_deep, anchor), 1e12;
+                       rtol=1e-9)
         # Current yield at par equals the profit rate.
         @test current_yield(50.0, 1000.0) ≈ 0.05
         # Zero-coupon: Macaulay duration equals maturity.
@@ -1204,5 +1218,7 @@ using LinearAlgebra
     include("stage3_p1_7.jl")
 
     include("stage3_p1_4.jl")
+
+    include("numerics_reference.jl")
 
 end

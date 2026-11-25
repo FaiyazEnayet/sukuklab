@@ -246,7 +246,9 @@ function bootstrap(instruments::Vector{Tuple{Vector{CashFlow},Float64}},
         z = try
             _solve_pillar(pillars, zeros, anchor, cfs, price)
         catch err
-            err isa ArgumentError || rethrow()
+            err isa ArgumentError || err isa YieldNoRootError ||
+                err isa YieldNoConvergenceError ||
+                err isa YieldPrecisionLimitError || rethrow()
             throw(ArgumentError(
                 "no curve fits the instrument maturing " *
                 "$(cfs[end].date) at its quoted price: $(err.msg)"))
@@ -295,7 +297,9 @@ function calibration_report(instruments::Vector{Tuple{Vector{CashFlow},Float64}}
         z = try
             _solve_pillar(pillars, zeros, anchor, cfs, price)
         catch err
-            err isa ArgumentError || rethrow()
+            err isa ArgumentError || err isa YieldNoRootError ||
+                err isa YieldNoConvergenceError ||
+                err isa YieldPrecisionLimitError || rethrow()
             push!(rows, (maturity=maturity, quoted_price=price,
                          model_price=NaN, residual=NaN,
                          status=:infeasible))
@@ -329,33 +333,32 @@ end
 """
     _bisect_zero(f; lo, hi, tol, maxiter)
 
-Bisection root finder for a continuous strictly decreasing `f`.
-The bracket expands automatically until `f(lo) > 0 > f(hi)`.
+Root finder for a continuous strictly decreasing `f`, on the
+shared solver core: the bracket expands automatically until
+`f(lo) > 0 > f(hi)`, then safeguarded bisection narrows it. A
+function with no sign change throws `YieldNoRootError`, a solve
+that runs out of iterations throws `YieldNoConvergenceError`,
+and a bracket that narrows to one floating-point step while the
+residual stays above `tol` throws `YieldPrecisionLimitError`.
 """
 function _bisect_zero(f; lo=-1.0, hi=5.0, tol=1e-12, maxiter=200)
-    flo, fhi = f(lo), f(hi)
-    for _ in 1:50
-        (flo > 0 && fhi < 0) && break
-        if flo <= 0
-            lo -= (hi - lo)
-        else
-            hi += (hi - lo)
-        end
-        flo, fhi = f(lo), f(hi)
+    r = _solve_decreasing(f, nothing, 0.0; domain_lo=-Inf,
+                          domain_hi=Inf, lo=float(lo), hi=float(hi),
+                          ftol=float(tol), xtol=float(tol),
+                          maxiter=maxiter)
+    r.status == :converged && return r.yield
+    if r.status == :no_root
+        throw(YieldNoRootError(
+            "could not bracket root for curve bootstrap", r.bracket))
+    elseif r.status == :no_convergence
+        throw(YieldNoConvergenceError(
+            "curve bootstrap solve did not converge in $maxiter " *
+            "iterations", r.bracket, r.abs_residual))
+    else
+        throw(YieldPrecisionLimitError(
+            "curve bootstrap solve reached the floating-point " *
+            "precision limit", r.bracket, r.abs_residual))
     end
-    (flo > 0 && fhi < 0) ||
-        throw(ArgumentError("could not bracket root for curve bootstrap"))
-    for _ in 1:maxiter
-        mid = (lo + hi) / 2
-        fmid = f(mid)
-        (abs(fmid) < tol || (hi - lo) < tol) && return mid
-        if fmid > 0
-            lo = mid
-        else
-            hi = mid
-        end
-    end
-    return (lo + hi) / 2
 end
 
 # ---------------------------------------------------------------------------

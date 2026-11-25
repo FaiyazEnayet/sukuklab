@@ -25,6 +25,12 @@ seller for. It is not the clean price; see `price_decomposition`.
 function price_from_cashflows(cfs::Vector{CashFlow}, y::Real, anchor::Date;
                               m::Int=2)
     m < 1 && throw(ArgumentError("m must be a positive integer"))
+    # Each term discounts by (1 + y/m)^(m*t), which needs a
+    # positive base: at y = -m the present value is undefined,
+    # and below it the power of a negative base is meaningless.
+    float(y) <= -m && throw(ArgumentError("yield must be above -$m " *
+                                          "(the yield at which " *
+                                          "1 + yield/m hits zero)"))
     yp = float(y) / m
     pv = 0.0
     for cf in cfs
@@ -35,29 +41,71 @@ function price_from_cashflows(cfs::Vector{CashFlow}, y::Real, anchor::Date;
     return pv
 end
 
+# Analytic derivative of price_from_cashflows with respect to the
+# nominal annual yield: each term a * (1 + y/m)^(-m*t)
+# differentiates to -a * t * (1 + y/m)^(-(m*t) - 1). Assumes the
+# inputs already passed price_from_cashflows validation.
+function _cashflow_dprice_dyield(cfs::Vector{CashFlow}, y::Real,
+                                 anchor::Date; m::Int=2)
+    yp = float(y) / m
+    acc = 0.0
+    for cf in cfs
+        t = yearfrac(anchor, cf.date, :actual_365)
+        t < 0 && throw(ArgumentError("cash flow before anchor"))
+        acc -= cf.amount * t / (1 + yp)^(m * t + 1)
+    end
+    return acc
+end
+
+"""
+    ytm_from_price_result(cfs, price, anchor; m=2, ftol=nothing, xtol=1e-12, maxiter=200)
+
+Nominal annual yield implied by `price`, as a
+`YieldSolveResult`: the solve status, the yield, the absolute
+and relative residual at the returned yield, the final bracket,
+and the iteration and evaluation counts. The bracket adapts to
+the valid domain (yield above -m), so a root outside the old
+hard-coded [-0.99, 5.0] bracket is found instead of reported
+missing, and the solve uses safeguarded Newton steps from the
+analytic price derivative with bisection as the fallback. A
+non-positive or non-finite price has no root (`:no_root`);
+malformed inputs (a cash flow before the anchor, a bad
+compounding frequency) throw `ArgumentError`, as
+`price_from_cashflows` does. `ftol` is the absolute residual
+tolerance, defaulting to 1e-12 of the target price (floored at
+1e-12); `xtol` is the bracket-width tolerance.
+"""
+function ytm_from_price_result(cfs::Vector{CashFlow}, price::Real,
+                               anchor::Date; m::Int=2, ftol=nothing,
+                               xtol::Float64=1e-12, maxiter::Int=200)
+    price = float(price)
+    if !isfinite(price) || price <= 0
+        return YieldSolveResult(:no_root, NaN, NaN, NaN, (-0.99, 5.0),
+                                0, 0)
+    end
+    f = y -> price_from_cashflows(cfs, y, anchor; m=m) - price
+    d = y -> _cashflow_dprice_dyield(cfs, y, anchor; m=m)
+    ftol_eff = ftol === nothing ? 1e-12 * max(1.0, price) : float(ftol)
+    return _solve_decreasing(f, d, price; domain_lo=-float(m),
+                             lo=-0.99, hi=5.0, ftol=ftol_eff,
+                             xtol=xtol, maxiter=maxiter)
+end
+
 """
     ytm_from_price(cfs, price, anchor; m=2)
 
-Nominal annual yield implied by `price`, by bisection. `price` is
-the full price of `cfs` as of `anchor` (see
-`price_from_cashflows`). Returns NaN when the price lies outside
-the attainable range.
+Nominal annual yield implied by `price`, by safeguarded
+Newton/bisection on an adaptive bracket over the valid domain
+(yield above -m). `price` is the full price of `cfs` as of
+`anchor` (see `price_from_cashflows`). Returns NaN when the
+price has no root: a non-positive or non-finite price. For the
+full solve outcome, including the residual, bracket and
+iteration count, see `ytm_from_price_result`.
 """
 function ytm_from_price(cfs::Vector{CashFlow}, price::Real, anchor::Date;
                         m::Int=2)
-    price = float(price)
-    price <= 0 && return NaN
-    f(y) = price_from_cashflows(cfs, y, anchor; m=m) - price
-    lo, hi = -0.99, 5.0
-    flo, fhi = f(lo), f(hi)
-    (flo < 0) == (fhi < 0) && return NaN
-    for _ in 1:200
-        mid = (lo + hi) / 2
-        fmid = f(mid)
-        (fmid < 0) == (flo < 0) ? (lo = mid; flo = fmid) : (hi = mid)
-        hi - lo < 1e-12 && break
-    end
-    return (lo + hi) / 2
+    r = ytm_from_price_result(cfs, price, anchor; m=m)
+    return r.status == :converged ? r.yield : NaN
 end
 
 """

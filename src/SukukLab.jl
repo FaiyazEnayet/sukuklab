@@ -7,6 +7,7 @@ portfolio aggregation. One clean import, no derivatives anywhere.
 """
 module SukukLab
 
+include("numerics.jl")
 include("sukuk.jl")
 include("cashflows.jl")
 include("curve.jl")
@@ -16,7 +17,10 @@ include("analytics.jl")
 include("curve_risk.jl")
 include("portfolio.jl")
 
-export sukuk_price, sukuk_ytm,
+export sukuk_price, sukuk_ytm, sukuk_ytm_result,
+    YieldSolveResult, YieldNoRootError, YieldNoConvergenceError,
+    YieldPrecisionLimitError, reference_sukuk_price,
+    reference_sukuk_ytm, reference_price, reference_ytm,
     CashFlow, SukukTerms, DayCount, Thirty360, Actual365, yearfrac,
     is_end_of_month, adjust_date, DistributionPeriod, distribution_periods,
     distribution_dates, payment_schedule,
@@ -32,7 +36,8 @@ export sukuk_price, sukuk_ytm,
     quote_risk,
     node_sensitivities, node_dv01, curve_risk, curve_risk_positions,
     PriceDecomposition, price_decomposition, ytm_from_clean_price,
-    price_from_cashflows, ytm_from_price, current_yield,
+    price_from_cashflows, ytm_from_price, ytm_from_price_result,
+    current_yield,
     NominalYield, ValuationContext, price, price_from_curve,
     bump_pillar, key_rate_dv01, key_rate_dv01s, curve_dv01,
     PricedBatch, prepare_batch, price_batch, price_batch!,
